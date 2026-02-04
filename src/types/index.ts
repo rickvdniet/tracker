@@ -10,6 +10,7 @@ export interface Transaction {
   currency: string;
   exchangeRate?: number;
   fees?: number;
+  notes?: string;
 }
 
 export interface Holding {
@@ -23,6 +24,36 @@ export interface Holding {
   profitLoss: number;
   profitLossPercent: number;
   currency: string;
+  tags?: string[];
+  notes?: string;
+  sector?: string;
+  dividendYield?: number;
+  annualDividend?: number;
+}
+
+export interface HoldingMetadata {
+  isin: string;
+  tags: string[];
+  notes: string;
+  sector: string;
+  dividendYield?: number;
+  expectedDividendPerShare?: number;
+  dividendFrequency?: 'monthly' | 'quarterly' | 'semi-annual' | 'annual';
+}
+
+export interface DividendInfo {
+  isin: string;
+  product: string;
+  date: Date;
+  amount: number;
+  currency: string;
+}
+
+export interface BenchmarkData {
+  date: string;
+  portfolioValue: number;
+  sp500: number;
+  msciWorld: number;
 }
 
 export interface PortfolioSnapshot {

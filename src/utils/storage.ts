@@ -1,10 +1,11 @@
-import type { Transaction, PortfolioSnapshot } from '../types';
+import type { Transaction, PortfolioSnapshot, HoldingMetadata } from '../types';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'degiro_transactions',
   SNAPSHOTS: 'degiro_snapshots',
   PRICES: 'degiro_prices',
   SETTINGS: 'degiro_settings',
+  HOLDING_METADATA: 'degiro_holding_metadata',
 } as const;
 
 function safeJSONParse<T>(value: string | null, fallback: T): T {
@@ -87,6 +88,16 @@ export function loadSettings(): Record<string, unknown> {
   return safeJSONParse(data, {});
 }
 
+export function saveHoldingMetadata(metadata: Map<string, HoldingMetadata>): void {
+  localStorage.setItem(STORAGE_KEYS.HOLDING_METADATA, JSON.stringify(Object.fromEntries(metadata)));
+}
+
+export function loadHoldingMetadata(): Map<string, HoldingMetadata> {
+  const data = localStorage.getItem(STORAGE_KEYS.HOLDING_METADATA);
+  const parsed = safeJSONParse<Record<string, HoldingMetadata>>(data, {});
+  return new Map(Object.entries(parsed));
+}
+
 export function clearAllData(): void {
   Object.values(STORAGE_KEYS).forEach((key) => {
     localStorage.removeItem(key);
@@ -99,6 +110,7 @@ export function exportAllData(): string {
     snapshots: loadSnapshots().map(serializeSnapshot),
     prices: Object.fromEntries(loadPrices()),
     settings: loadSettings(),
+    holdingMetadata: Object.fromEntries(loadHoldingMetadata()),
     exportDate: new Date().toISOString(),
   }, null, 2);
 }
@@ -118,6 +130,9 @@ export function importAllData(jsonString: string): boolean {
     }
     if (data.settings) {
       saveSettings(data.settings);
+    }
+    if (data.holdingMetadata) {
+      saveHoldingMetadata(new Map(Object.entries(data.holdingMetadata)));
     }
 
     return true;

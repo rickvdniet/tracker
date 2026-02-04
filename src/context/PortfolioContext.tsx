@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
-import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange } from '../types';
+import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange, HoldingMetadata } from '../types';
 import {
   calculateHoldings,
   updateHoldingsWithPrices,
@@ -12,6 +12,8 @@ import {
   saveSnapshots,
   savePrices,
   loadPrices,
+  saveHoldingMetadata,
+  loadHoldingMetadata,
 } from '../utils/storage';
 
 interface PortfolioState {
@@ -20,6 +22,7 @@ interface PortfolioState {
   snapshots: PortfolioSnapshot[];
   stats: PortfolioStats;
   prices: Map<string, number>;
+  holdingMetadata: Map<string, HoldingMetadata>;
   isLoading: boolean;
   selectedTimeRange: TimeRange;
 }
@@ -30,6 +33,8 @@ type PortfolioAction =
   | { type: 'ADD_TRANSACTIONS'; payload: Transaction[] }
   | { type: 'DELETE_TRANSACTION'; payload: string }
   | { type: 'UPDATE_PRICES'; payload: Map<string, number> }
+  | { type: 'UPDATE_HOLDING_METADATA'; payload: HoldingMetadata }
+  | { type: 'SET_HOLDING_METADATA'; payload: Map<string, HoldingMetadata> }
   | { type: 'SET_TIME_RANGE'; payload: TimeRange }
   | { type: 'RECALCULATE' }
   | { type: 'CLEAR_ALL' };
@@ -49,6 +54,7 @@ const initialState: PortfolioState = {
     numberOfHoldings: 0,
   },
   prices: new Map(),
+  holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: 'ALL',
 };
@@ -103,6 +109,15 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
     case 'SET_TIME_RANGE':
       return { ...state, selectedTimeRange: action.payload };
 
+    case 'UPDATE_HOLDING_METADATA': {
+      const newMetadata = new Map(state.holdingMetadata);
+      newMetadata.set(action.payload.isin, action.payload);
+      return { ...state, holdingMetadata: newMetadata };
+    }
+
+    case 'SET_HOLDING_METADATA':
+      return { ...state, holdingMetadata: action.payload };
+
     case 'RECALCULATE':
       return recalculateState(state);
 
@@ -121,6 +136,7 @@ interface PortfolioContextValue extends PortfolioState {
   addTransactions: (transactions: Transaction[]) => void;
   deleteTransaction: (id: string) => void;
   updatePrices: (prices: Map<string, number>) => void;
+  updateHoldingMetadata: (metadata: HoldingMetadata) => void;
   setTimeRange: (range: TimeRange) => void;
   clearAll: () => void;
   refreshData: () => void;
@@ -135,8 +151,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const transactions = loadTransactions();
     const prices = loadPrices();
+    const metadata = loadHoldingMetadata();
 
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
+    dispatch({ type: 'SET_HOLDING_METADATA', payload: metadata });
     dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
     dispatch({ type: 'SET_LOADING', payload: false });
   }, []);
@@ -155,6 +173,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.prices, state.isLoading]);
 
+  useEffect(() => {
+    if (!state.isLoading && state.holdingMetadata.size > 0) {
+      saveHoldingMetadata(state.holdingMetadata);
+    }
+  }, [state.holdingMetadata, state.isLoading]);
+
   const addTransactions = useCallback((transactions: Transaction[]) => {
     dispatch({ type: 'ADD_TRANSACTIONS', payload: transactions });
   }, []);
@@ -165,6 +189,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const updatePrices = useCallback((prices: Map<string, number>) => {
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
+  }, []);
+
+  const updateHoldingMetadata = useCallback((metadata: HoldingMetadata) => {
+    dispatch({ type: 'UPDATE_HOLDING_METADATA', payload: metadata });
   }, []);
 
   const setTimeRange = useCallback((range: TimeRange) => {
@@ -186,6 +214,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     addTransactions,
     deleteTransaction,
     updatePrices,
+    updateHoldingMetadata,
     setTimeRange,
     clearAll,
     refreshData,
