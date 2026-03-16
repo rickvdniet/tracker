@@ -11,9 +11,14 @@ import {
 import { format } from 'date-fns';
 import { TrendingUp, RefreshCw, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
-import { filterSnapshotsByTimeRange, formatCurrency, formatPercent } from '../utils/calculations';
+import { filterSnapshotsByTimeRange, formatCurrency, formatPercent, type ChartGranularity } from '../utils/calculations';
 import { isinToTicker } from '../utils/priceApi';
 import type { TimeRange } from '../types';
+
+const granularityOptions: { value: ChartGranularity; label: string }[] = [
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+];
 
 const timeRanges: { value: TimeRange; label: string }[] = [
   { value: '1M', label: '1M' },
@@ -37,14 +42,15 @@ interface CustomTooltipProps {
   label?: string;
 }
 
-function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+function CustomTooltip({ active, payload, label, granularity }: CustomTooltipProps & { granularity?: ChartGranularity }) {
   if (!active || !payload || payload.length === 0 || !label) return null;
   const data = payload[0].payload;
   const pct = data.totalInvested > 0 ? (data.totalProfitLoss / data.totalInvested) * 100 : 0;
+  const dateFormat = granularity === 'weekly' ? 'd MMM yyyy' : 'MMM yyyy';
 
   return (
     <div className="bg-slate-700 border border-slate-600 rounded-lg p-3 shadow-lg">
-      <p className="text-sm text-slate-400 mb-2">{format(new Date(label), 'MMM yyyy')}</p>
+      <p className="text-sm text-slate-400 mb-2">{format(new Date(label), dateFormat)}</p>
       <div className="space-y-1">
         <div className="flex justify-between gap-4">
           <span className="text-sm text-slate-300">Value:</span>
@@ -73,6 +79,8 @@ export function PortfolioChart() {
     historicalPricesLoading,
     selectedTimeRange,
     setTimeRange,
+    chartGranularity,
+    setChartGranularity,
     fetchHistoricalData,
   } = usePortfolio();
 
@@ -149,6 +157,23 @@ export function PortfolioChart() {
             ))}
           </select>
         )}
+
+        {/* Granularity toggle */}
+        <div className="flex gap-1 bg-slate-700/50 rounded-lg p-1">
+          {granularityOptions.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setChartGranularity(value)}
+              className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${
+                chartGranularity === value
+                  ? 'bg-indigo-500 text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {/* Time range buttons */}
         <div className="flex gap-1 bg-slate-700/50 rounded-lg p-1">
@@ -251,7 +276,7 @@ export function PortfolioChart() {
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
               <XAxis
                 dataKey="date"
-                tickFormatter={(value) => format(new Date(value), 'MMM yy')}
+                tickFormatter={(value) => format(new Date(value), chartGranularity === 'weekly' ? 'd MMM' : 'MMM yy')}
                 stroke="#6b7280"
                 fontSize={12}
                 tickLine={false}
@@ -265,7 +290,7 @@ export function PortfolioChart() {
                 axisLine={false}
                 width={60}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<CustomTooltip granularity={chartGranularity} />} />
               <Area
                 type="monotone"
                 dataKey="totalInvested"

@@ -5,6 +5,7 @@ import {
   updateHoldingsWithPrices,
   calculatePortfolioStats,
   calculateHistoricalSnapshots,
+  type ChartGranularity,
 } from '../utils/calculations';
 import {
   saveTransactions,
@@ -32,6 +33,7 @@ interface PortfolioState {
   holdingMetadata: Map<string, HoldingMetadata>;
   isLoading: boolean;
   selectedTimeRange: TimeRange;
+  chartGranularity: ChartGranularity;
 }
 
 type PortfolioAction =
@@ -45,6 +47,7 @@ type PortfolioAction =
   | { type: 'UPDATE_HOLDING_METADATA'; payload: HoldingMetadata }
   | { type: 'SET_HOLDING_METADATA'; payload: Map<string, HoldingMetadata> }
   | { type: 'SET_TIME_RANGE'; payload: TimeRange }
+  | { type: 'SET_CHART_GRANULARITY'; payload: ChartGranularity }
   | { type: 'RECALCULATE' }
   | { type: 'CLEAR_ALL' };
 
@@ -68,6 +71,7 @@ const initialState: PortfolioState = {
   holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: 'ALL',
+  chartGranularity: 'monthly',
 };
 
 function recalculateState(state: PortfolioState): PortfolioState {
@@ -76,7 +80,13 @@ function recalculateState(state: PortfolioState): PortfolioState {
     ? updateHoldingsWithPrices(holdings, state.prices, state.exchangeRates)
     : holdings;
   const stats = calculatePortfolioStats(state.transactions, holdingsWithPrices, state.exchangeRates);
-  const snapshots = calculateHistoricalSnapshots(state.transactions, state.prices, state.exchangeRates, state.historicalPrices);
+  const snapshots = calculateHistoricalSnapshots(
+    state.transactions,
+    state.prices,
+    state.exchangeRates,
+    state.historicalPrices,
+    state.chartGranularity
+  );
 
   return {
     ...state,
@@ -130,6 +140,11 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
     case 'SET_TIME_RANGE':
       return { ...state, selectedTimeRange: action.payload };
 
+    case 'SET_CHART_GRANULARITY': {
+      const newState = { ...state, chartGranularity: action.payload };
+      return recalculateState(newState);
+    }
+
     case 'UPDATE_HOLDING_METADATA': {
       const newMetadata = new Map(state.holdingMetadata);
       newMetadata.set(action.payload.isin, action.payload);
@@ -160,6 +175,7 @@ interface PortfolioContextValue extends PortfolioState {
   updateExchangeRates: (rates: Map<string, number>) => void;
   updateHoldingMetadata: (metadata: HoldingMetadata) => void;
   setTimeRange: (range: TimeRange) => void;
+  setChartGranularity: (granularity: ChartGranularity) => void;
   clearAll: () => void;
   refreshData: () => void;
   fetchHistoricalData: (isins: string[]) => Promise<void>;
@@ -238,6 +254,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SET_TIME_RANGE', payload: range });
   }, []);
 
+  const setChartGranularity = useCallback((granularity: ChartGranularity) => {
+    dispatch({ type: 'SET_CHART_GRANULARITY', payload: granularity });
+  }, []);
+
   const clearAll = useCallback(() => {
     dispatch({ type: 'CLEAR_ALL' });
     saveTransactions([]);
@@ -276,6 +296,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     updateExchangeRates,
     updateHoldingMetadata,
     setTimeRange,
+    setChartGranularity,
     clearAll,
     refreshData,
     fetchHistoricalData,

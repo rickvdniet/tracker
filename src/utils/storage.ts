@@ -1,4 +1,5 @@
 import type { Transaction, PortfolioSnapshot, HoldingMetadata } from '../types';
+import { getPriceCurrency } from './priceApi';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'degiro_transactions',
@@ -142,7 +143,17 @@ export function importAllData(jsonString: string): boolean {
     const data = JSON.parse(jsonString);
 
     if (data.transactions) {
-      saveTransactions(data.transactions.map(deserializeTransaction));
+      // Fix currencies during import using ISIN-to-ticker mapping
+      const transactions = data.transactions.map(deserializeTransaction).map((t: Transaction) => {
+        if (t.isin) {
+          const inferredCurrency = getPriceCurrency(t.isin);
+          if (inferredCurrency && t.currency === 'EUR' && inferredCurrency !== 'EUR') {
+            return { ...t, currency: inferredCurrency };
+          }
+        }
+        return t;
+      });
+      saveTransactions(transactions);
     }
     if (data.snapshots) {
       saveSnapshots(data.snapshots.map(deserializeSnapshot));
@@ -162,4 +173,28 @@ export function importAllData(jsonString: string): boolean {
     console.error('Failed to import data:', error);
     return false;
   }
+}
+
+// Fix currencies in existing transactions using ISIN-to-ticker mapping
+// Returns the number of transactions that were corrected
+export function migrateTransactionCurrencies(): number {
+  const transactions = loadTransactions();
+  let corrected = 0;
+
+  const fixed = transactions.map((t) => {
+    if (t.isin && t.currency === 'EUR') {
+      const inferredCurrency = getPriceCurrency(t.isin);
+      if (inferredCurrency && inferredCurrency !== 'EUR') {
+        corrected++;
+        return { ...t, currency: inferredCurrency };
+      }
+    }
+    return t;
+  });
+
+  if (corrected > 0) {
+    saveTransactions(fixed);
+  }
+
+  return corrected;
 }
