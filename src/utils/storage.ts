@@ -108,7 +108,9 @@ export function saveExchangeRates(rates: Map<string, number>): void {
 export function loadExchangeRates(): Map<string, number> {
   const data = localStorage.getItem(STORAGE_KEYS.EXCHANGE_RATES);
   const parsed = safeJSONParse<Record<string, number>>(data, {});
-  return new Map(Object.entries(parsed));
+  const result = new Map(Object.entries(parsed));
+  console.log('[loadExchangeRates] Loaded from storage:', Object.fromEntries(result));
+  return result;
 }
 
 export function saveHoldingMetadata(metadata: Map<string, HoldingMetadata>): void {
@@ -142,6 +144,13 @@ export function exportAllData(): string {
 export function importAllData(jsonString: string): boolean {
   try {
     const data = JSON.parse(jsonString);
+    console.log('[importAllData] Parsed backup:', {
+      hasTransactions: !!data.transactions,
+      transactionCount: data.transactions?.length,
+      hasExchangeRates: !!data.exchangeRates,
+      exchangeRates: data.exchangeRates,
+      hasPrices: !!data.prices,
+    });
 
     if (data.transactions) {
       // Fix currencies during import using ISIN-to-ticker mapping

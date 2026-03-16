@@ -30,6 +30,19 @@ export function calculateHoldings(
       : (transaction.exchangeRate ?? toEurRate(transaction.currency, exchangeRates));
 
     const costEur = (transaction.totalAmount + (transaction.fees || 0)) * rate;
+
+    // Debug non-EUR transactions
+    if (transaction.currency !== 'EUR') {
+      console.log('[calculateHoldings] Non-EUR transaction:', {
+        product: transaction.product,
+        currency: transaction.currency,
+        totalAmount: transaction.totalAmount,
+        storedExchangeRate: transaction.exchangeRate,
+        mapRate: exchangeRates.get(transaction.currency),
+        usedRate: rate,
+        costEur,
+      });
+    }
     const existing = holdingsMap.get(transaction.isin);
 
     if (existing) {
