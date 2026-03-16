@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
-import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle, Wrench } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { parseDeGiroTransactions, exportTransactionsToCSV } from '../utils/csvParser';
-import { exportAllData, importAllData } from '../utils/storage';
+import { exportAllData, importAllData, migrateTransactionCurrencies } from '../utils/storage';
 
 export function ImportExport() {
   const { transactions, addTransactions, clearAll } = usePortfolio();
@@ -163,6 +163,28 @@ export function ImportExport() {
           >
             <Upload className="w-4 h-4" />
             Restore Backup
+          </button>
+        </div>
+
+        <hr className="border-slate-700" />
+
+        <div>
+          <p className="text-sm text-slate-400 mb-2">Fix currencies using ISIN mapping</p>
+          <button
+            onClick={() => {
+              const corrected = migrateTransactionCurrencies();
+              if (corrected > 0) {
+                setStatus({ type: 'success', message: `Fixed ${corrected} transaction(s). Refresh the page.` });
+                setTimeout(() => window.location.reload(), 1500);
+              } else {
+                setStatus({ type: 'success', message: 'No currencies needed fixing' });
+              }
+            }}
+            disabled={transactions.length === 0}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Wrench className="w-4 h-4" />
+            Fix Currencies
           </button>
         </div>
 

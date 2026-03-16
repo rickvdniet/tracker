@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import type { Transaction } from '../types';
+import { getPriceCurrency } from './priceApi';
 
 interface DeGiroTransactionRow {
   Datum: string;
@@ -88,16 +89,20 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
       continue;
     }
 
+    const isin = row.ISIN || '';
+    // Infer currency from ISIN ticker mapping; DeGiro CSV doesn't include it
+    const inferredCurrency = isin ? getPriceCurrency(isin) : null;
+
     const transaction: Transaction = {
       id: generateId(),
       date: parseDate(row.Datum),
       type,
       product: row.Product || row.Omschrijving || '',
-      isin: row.ISIN || '',
+      isin,
       quantity: type === 'sell' ? -quantity : quantity,
       price,
       totalAmount: Math.abs(total),
-      currency: 'EUR',
+      currency: inferredCurrency || 'EUR',
       exchangeRate: parseNumber(row.Wisselkoers) || 1,
       fees: fees > 0 ? fees : undefined,
     };
@@ -132,16 +137,19 @@ export function parseDeGiroAccountStatement(csvContent: string): Transaction[] {
     else if (mutation < 0) type = 'buy';
     else if (mutation > 0) type = 'sell';
 
+    const isin = row.ISIN || '';
+    const inferredCurrency = isin ? getPriceCurrency(isin) : null;
+
     transactions.push({
       id: generateId(),
       date: parseDate(row.Datum),
       type,
       product: row.Product || row.Omschrijving || '',
-      isin: row.ISIN || '',
+      isin,
       quantity: 0,
       price: 0,
       totalAmount: Math.abs(mutation),
-      currency: 'EUR',
+      currency: inferredCurrency || 'EUR',
     });
   }
 
