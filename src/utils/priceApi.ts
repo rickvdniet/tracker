@@ -1,3 +1,31 @@
+const PROXY_STORAGE_KEY = 'degiro_custom_proxy_url';
+
+export function getCustomProxyUrl(): string {
+  return localStorage.getItem(PROXY_STORAGE_KEY) ?? '';
+}
+
+export function setCustomProxyUrl(url: string): void {
+  const trimmed = url.trim().replace(/\/?$/, '/'); // ensure trailing slash
+  if (trimmed === '/') {
+    localStorage.removeItem(PROXY_STORAGE_KEY);
+  } else {
+    localStorage.setItem(PROXY_STORAGE_KEY, trimmed);
+  }
+}
+
+// Build ordered list of CORS proxies to try.
+// Custom proxy (if set) goes first; public fallbacks follow.
+function getProxies(): string[] {
+  const custom = getCustomProxyUrl();
+  const publics = [
+    'https://corsproxy.io/?url=',
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
+  // Custom Cloudflare Worker expects: <workerUrl>?url=<encoded-target>
+  return custom ? [`${custom}?url=`, ...publics] : publics;
+}
+
 // ISIN to ticker symbol mapping (common European stocks and ETFs)
 const ISIN_TO_TICKER: Record<string, string> = {
   // US Stocks
@@ -123,14 +151,7 @@ export async function fetchPrice(isin: string): Promise<PriceResult> {
     };
   }
 
-  // Try three different CORS proxies in order
-  const proxies = [
-    'https://corsproxy.io/?url=',
-    'https://api.allorigins.win/raw?url=',
-    'https://api.codetabs.com/v1/proxy?quest=',
-  ];
-
-  for (const proxy of proxies) {
+  for (const proxy of getProxies()) {
     const result = await fetchViaProxy(ticker, proxy);
     if (result && result.price > 0) {
       return {
@@ -158,13 +179,8 @@ export async function fetchHistoricalPrices(
   rangeYears: number = 5
 ): Promise<Array<{ date: string; price: number }>> {
   const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1wk&range=${rangeYears}y`;
-  const proxies = [
-    'https://corsproxy.io/?url=',
-    'https://api.allorigins.win/raw?url=',
-    'https://api.codetabs.com/v1/proxy?quest=',
-  ];
 
-  for (const proxy of proxies) {
+  for (const proxy of getProxies()) {
     try {
       const response = await fetch(proxy + encodeURIComponent(targetUrl), {
         signal: AbortSignal.timeout(12000),
@@ -200,12 +216,7 @@ export async function fetchHistoricalPrices(
 export async function fetchExchangeRate(currency: string): Promise<number | null> {
   if (currency === 'EUR') return 1;
   const ticker = `${currency}EUR=X`;
-  const proxies = [
-    'https://corsproxy.io/?url=',
-    'https://api.allorigins.win/raw?url=',
-    'https://api.codetabs.com/v1/proxy?quest=',
-  ];
-  for (const proxy of proxies) {
+  for (const proxy of getProxies()) {
     const result = await fetchViaProxy(ticker, proxy);
     if (result && result.price > 0) return result.price;
   }
