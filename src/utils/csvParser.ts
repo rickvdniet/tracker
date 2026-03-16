@@ -98,7 +98,14 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
   // Debug: log found columns
   if (result.data.length > 0) {
     console.log('CSV columns found:', Object.keys(result.data[0]));
-    console.log('First row:', result.data[0]);
+    console.log('First row raw:', result.data[0]);
+    // Debug currency specifically
+    const firstRow = result.data[0];
+    console.log('Currency column check:', {
+      hasCurrency: 'Currency' in firstRow,
+      currencyValue: firstRow['Currency'],
+      getFieldResult: getField(firstRow, 'currency'),
+    });
   } else {
     console.warn('CSV has no data rows');
   }
@@ -130,6 +137,11 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
     const explicitCurrency = getField(row, 'currency');
     const inferredCurrency = isin ? getPriceCurrency(isin) : null;
     const currency = explicitCurrency || inferredCurrency || 'EUR';
+
+    // Debug currency for SEK stocks
+    if (isin && isin.startsWith('SE')) {
+      console.log('SEK stock currency debug:', { isin, product, explicitCurrency, inferredCurrency, finalCurrency: currency });
+    }
 
     // For tracker exports, quantity may already be negative for sells
     const rawQuantity = parseNumber(getField(row, 'quantity'));
