@@ -151,6 +151,22 @@ export async function fetchPrice(isin: string): Promise<PriceResult> {
   };
 }
 
+// Fetch EUR per 1 unit of the given currency (e.g. 'SEK' → ~0.088)
+export async function fetchExchangeRate(currency: string): Promise<number | null> {
+  if (currency === 'EUR') return 1;
+  const ticker = `${currency}EUR=X`;
+  const proxies = [
+    'https://corsproxy.io/?url=',
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
+  for (const proxy of proxies) {
+    const result = await fetchViaProxy(ticker, proxy);
+    if (result && result.price > 0) return result.price;
+  }
+  return null;
+}
+
 export async function fetchPrices(isins: string[]): Promise<Map<string, PriceResult>> {
   loadCustomMappings();
   const results = new Map<string, PriceResult>();

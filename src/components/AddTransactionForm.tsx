@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Plus, X, ChevronDown } from 'lucide-react';
+import { Plus, X, ChevronDown, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import type { Transaction } from '../types';
+import { fetchExchangeRate } from '../utils/priceApi';
 
 const CURRENCIES = ['EUR', 'SEK', 'USD', 'GBP', 'NOK', 'DKK', 'CHF'];
 
@@ -10,7 +11,7 @@ interface AddTransactionFormProps {
 }
 
 export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
-  const { addTransactions, holdings } = usePortfolio();
+  const { addTransactions, holdings, exchangeRates, updateExchangeRates } = usePortfolio();
   const [isOpen, setIsOpen] = useState(false);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -21,9 +22,31 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
     price: '',
     fees: '',
     currency: 'EUR',
+    exchangeRate: '',
     notes: '',
   });
   const [error, setError] = useState('');
+  const [fetchingRate, setFetchingRate] = useState(false);
+
+  const handleCurrencyChange = async (currency: string) => {
+    setFormData((prev) => ({ ...prev, currency, exchangeRate: '' }));
+    if (currency === 'EUR') return;
+    // Pre-fill with known rate if available
+    const known = exchangeRates.get(currency);
+    if (known) {
+      setFormData((prev) => ({ ...prev, currency, exchangeRate: known.toFixed(6) }));
+      return;
+    }
+    setFetchingRate(true);
+    const rate = await fetchExchangeRate(currency);
+    setFetchingRate(false);
+    if (rate) {
+      setFormData((prev) => ({ ...prev, exchangeRate: rate.toFixed(6) }));
+      const newRates = new Map(exchangeRates);
+      newRates.set(currency, rate);
+      updateExchangeRates(newRates);
+    }
+  };
 
   const handleSelectHolding = (isin: string) => {
     const holding = holdings.find((h) => h.isin === isin);
@@ -59,6 +82,10 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       ? quantity * price
       : parseFloat(formData.price) || 0;
 
+    const exchangeRate = formData.currency !== 'EUR' && formData.exchangeRate
+      ? parseFloat(formData.exchangeRate)
+      : undefined;
+
     const transaction: Transaction = {
       id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
       date: new Date(formData.date),
@@ -69,6 +96,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       price,
       totalAmount,
       currency: formData.currency,
+      exchangeRate: exchangeRate && !isNaN(exchangeRate) ? exchangeRate : undefined,
       fees: fees > 0 ? fees : undefined,
       notes: formData.notes.trim() || undefined,
     };
@@ -84,6 +112,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       price: '',
       fees: '',
       currency: 'EUR',
+      exchangeRate: '',
       notes: '',
     });
 
@@ -214,7 +243,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
               <button
                 key={c}
                 type="button"
-                onClick={() => setFormData({ ...formData, currency: c })}
+                onClick={() => handleCurrencyChange(c)}
                 className={`py-2 text-sm rounded-lg border transition-colors font-medium ${
                   formData.currency === c
                     ? 'bg-emerald-600 border-emerald-500 text-white'
@@ -226,6 +255,29 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
             ))}
           </div>
         </div>
+
+        {formData.currency !== 'EUR' && (
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">
+              Exchange Rate (1 {formData.currency} = ? EUR)
+              {fetchingRate && <Loader2 className="inline w-3 h-3 ml-1 animate-spin" />}
+            </label>
+            <input
+              type="number"
+              value={formData.exchangeRate}
+              onChange={(e) => setFormData({ ...formData, exchangeRate: e.target.value })}
+              placeholder="e.g. 0.088 for SEK"
+              step="0.000001"
+              min="0"
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-emerald-500 focus:border-emerald-500"
+            />
+            {formData.exchangeRate && formData.price && (formData.type === 'buy' || formData.type === 'sell') && formData.quantity && (
+              <p className="text-xs text-slate-500 mt-1">
+                ≈ {(parseFloat(formData.quantity) * parseFloat(formData.price) * parseFloat(formData.exchangeRate)).toFixed(2)} EUR
+              </p>
+            )}
+          </div>
+        )}
 
         {(formData.type === 'buy' || formData.type === 'sell') && (
           <div className="grid grid-cols-2 gap-4">
