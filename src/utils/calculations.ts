@@ -139,21 +139,19 @@ export function calculatePortfolioStats(
 }
 
 // Look up the best available price for an ISIN in a given month.
-// Prefers the historical price for that exact month; falls back to the
-// most recent earlier month in history; then falls back to currentPrices.
+// Handles both 'yyyy-MM' (monthly) and 'yyyy-MM-dd' (weekly) stored dates by
+// truncating to yyyy-MM for comparison against the monthKey.
 function getMonthlyPrice(
   isin: string,
-  monthKey: string,
+  monthKey: string, // 'yyyy-MM'
   historicalPrices: Map<string, Array<{ date: string; price: number }>>,
   currentPrices: Map<string, number>
 ): number {
   const history = historicalPrices.get(isin);
   if (history && history.length > 0) {
-    const exact = history.find((p) => p.date === monthKey);
-    if (exact && exact.price > 0) return exact.price;
-    // Most recent available price up to (but not after) this month
-    const prior = history.filter((p) => p.date <= monthKey && p.price > 0);
-    if (prior.length > 0) return prior[prior.length - 1].price;
+    // Keep all prices whose month prefix is <= monthKey, then take the last one
+    const upToMonth = history.filter((p) => p.price > 0 && p.date.substring(0, 7) <= monthKey);
+    if (upToMonth.length > 0) return upToMonth[upToMonth.length - 1].price;
   }
   return currentPrices.get(isin) ?? 0;
 }

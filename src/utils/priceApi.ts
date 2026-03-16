@@ -157,7 +157,7 @@ export async function fetchHistoricalPrices(
   ticker: string,
   rangeYears: number = 5
 ): Promise<Array<{ date: string; price: number }>> {
-  const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1mo&range=${rangeYears}y`;
+  const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1wk&range=${rangeYears}y`;
   const proxies = [
     'https://corsproxy.io/?url=',
     'https://api.allorigins.win/raw?url=',
@@ -183,9 +183,9 @@ export async function fetchHistoricalPrices(
       for (let i = 0; i < timestamps.length; i++) {
         const price = closes[i];
         if (price == null || price <= 0) continue;
-        // Yahoo returns start-of-month timestamps; format as yyyy-MM
+        // Format as yyyy-MM-dd (week start date)
         const d = new Date(timestamps[i] * 1000);
-        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         points.push({ date: dateStr, price });
       }
       if (points.length > 0) return points;
