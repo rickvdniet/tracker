@@ -1,5 +1,6 @@
 import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange } from '../types';
 import { subMonths, startOfYear, isAfter, format } from 'date-fns';
+import { getPriceCurrency } from './priceApi';
 
 // Returns EUR per 1 unit of the given currency from the exchange rates map
 function toEurRate(currency: string, exchangeRates: Map<string, number>): number {
@@ -87,7 +88,10 @@ export function updateHoldingsWithPrices(
       return { ...holding, currentPrice: 0, currentValue: holding.totalCost, profitLoss: 0, profitLossPercent: 0 };
     }
 
-    const rate = toEurRate(holding.currency, exchangeRates);
+    // Use the ticker-inferred currency when available — CSV imports hardcode
+    // holding.currency='EUR' even for SEK/GBP/USD stocks, so we can't trust it.
+    const priceCurrency = getPriceCurrency(holding.isin) ?? holding.currency;
+    const rate = toEurRate(priceCurrency, exchangeRates);
     const currentValueEur = holding.quantity * priceLocal * rate;
     const profitLoss = currentValueEur - holding.totalCost;
     const profitLossPercent = holding.totalCost > 0 ? (profitLoss / holding.totalCost) * 100 : 0;

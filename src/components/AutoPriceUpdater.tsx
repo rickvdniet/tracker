@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { RefreshCw, Check, AlertCircle, Edit2, Plus, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { formatCurrency } from '../utils/calculations';
-import { fetchPrices, fetchExchangeRate, isinToTicker, registerIsinMapping, type PriceResult } from '../utils/priceApi';
+import { fetchPrices, fetchExchangeRate, getPriceCurrency, isinToTicker, registerIsinMapping, type PriceResult } from '../utils/priceApi';
 
 export function AutoPriceUpdater() {
   const { holdings, prices, exchangeRates, updatePrices, updateExchangeRates } = usePortfolio();
@@ -34,10 +34,14 @@ export function AutoPriceUpdater() {
       });
       updatePrices(newPrices);
 
-      // Auto-fetch exchange rates for every non-EUR currency across holdings
-      // and price results — this ensures SEK/USD prices are correctly converted to EUR
+      // Auto-fetch exchange rates for every non-EUR currency.
+      // Use ticker-inferred currency (not holding.currency) because CSV imports
+      // hardcode holding.currency='EUR' even for SEK/GBP/USD stocks.
       const currenciesNeeded = new Set<string>();
-      holdings.forEach((h) => { if (h.currency !== 'EUR') currenciesNeeded.add(h.currency); });
+      holdings.forEach((h) => {
+        const c = getPriceCurrency(h.isin) ?? h.currency;
+        if (c !== 'EUR') currenciesNeeded.add(c);
+      });
       priceResults.forEach((r) => { if (!r.error && r.currency !== 'EUR') currenciesNeeded.add(r.currency); });
 
       if (currenciesNeeded.size > 0) {

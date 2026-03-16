@@ -87,6 +87,26 @@ export function isinToTicker(isin: string): string | null {
   return ISIN_TO_TICKER[isin.toUpperCase()] || null;
 }
 
+// Infer the trading currency from the Yahoo Finance ticker suffix.
+// This is needed because DeGiro CSV imports hardcode currency='EUR' on all transactions,
+// even for stocks that trade in SEK, GBP, USD, etc.
+export function getCurrencyFromTicker(ticker: string): string | null {
+  if (ticker.endsWith('.ST')) return 'SEK';
+  if (ticker.endsWith('.L'))  return 'GBP';
+  if (ticker.endsWith('.SW') || ticker.endsWith('.VX')) return 'CHF';
+  if (ticker.endsWith('.OL')) return 'NOK';
+  if (ticker.endsWith('.CO')) return 'DKK';
+  if (/\.(AS|PA|DE|MI|BR|LS|BE|HE|IR|AT)$/i.test(ticker)) return 'EUR';
+  // US tickers have no exchange suffix
+  if (!ticker.includes('.')) return 'USD';
+  return null; // unknown exchange
+}
+
+export function getPriceCurrency(isin: string): string | null {
+  const ticker = isinToTicker(isin);
+  return ticker ? getCurrencyFromTicker(ticker) : null;
+}
+
 export function registerIsinMapping(isin: string, ticker: string): void {
   ISIN_TO_TICKER[isin.toUpperCase()] = ticker;
   const customMappings = JSON.parse(localStorage.getItem('custom_isin_mappings') || '{}');
