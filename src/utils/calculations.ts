@@ -1,5 +1,5 @@
 import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange } from '../types';
-import { subMonths, startOfYear, isAfter, format } from 'date-fns';
+import { subMonths, startOfYear, isAfter, format, eachWeekOfInterval, eachMonthOfInterval, max } from 'date-fns';
 import { getPriceCurrency } from './priceApi';
 
 // Returns EUR per 1 unit of the given currency from the exchange rates map
@@ -142,59 +142,67 @@ export function calculatePortfolioStats(
   };
 }
 
-// Look up the best available price for an ISIN in a given month.
-// Handles both 'yyyy-MM' (monthly) and 'yyyy-MM-dd' (weekly) stored dates by
-// truncating to yyyy-MM for comparison against the monthKey.
-function getMonthlyPrice(
+// Look up the best available price for an ISIN at a given date key.
+// Supports both 'yyyy-MM' (monthly) and 'yyyy-MM-dd' (weekly) keys.
+function getHistoricalPrice(
   isin: string,
-  monthKey: string, // 'yyyy-MM'
+  dateKey: string, // 'yyyy-MM' or 'yyyy-MM-dd'
   historicalPrices: Map<string, Array<{ date: string; price: number }>>,
   currentPrices: Map<string, number>
 ): number {
   const history = historicalPrices.get(isin);
   if (history && history.length > 0) {
-    // Keep all prices whose month prefix is <= monthKey, then take the last one
-    const upToMonth = history.filter((p) => p.price > 0 && p.date.substring(0, 7) <= monthKey);
-    if (upToMonth.length > 0) return upToMonth[upToMonth.length - 1].price;
+    // For weekly keys (yyyy-MM-dd), compare full date; for monthly, compare prefix
+    const keyLen = dateKey.length;
+    const upToDate = history.filter((p) => p.price > 0 && p.date.substring(0, keyLen) <= dateKey);
+    if (upToDate.length > 0) return upToDate[upToDate.length - 1].price;
   }
   return currentPrices.get(isin) ?? 0;
 }
+
+export type ChartGranularity = 'weekly' | 'monthly';
 
 export function calculateHistoricalSnapshots(
   transactions: Transaction[],
   currentPrices: Map<string, number> = new Map(),
   exchangeRates: Map<string, number> = new Map(),
-  historicalPrices: Map<string, Array<{ date: string; price: number }>> = new Map()
+  historicalPrices: Map<string, Array<{ date: string; price: number }>> = new Map(),
+  granularity: ChartGranularity = 'monthly'
 ): PortfolioSnapshot[] {
   if (transactions.length === 0) return [];
 
-  const snapshots: PortfolioSnapshot[] = [];
   const sortedTransactions = [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
+  const firstDate = sortedTransactions[0].date;
+  const lastDate = max([sortedTransactions[sortedTransactions.length - 1].date, new Date()]);
 
-  const monthlyGroups = new Map<string, Transaction[]>();
-  for (const t of sortedTransactions) {
-    const key = format(t.date, 'yyyy-MM');
-    const existing = monthlyGroups.get(key) || [];
-    existing.push(t);
-    monthlyGroups.set(key, existing);
-  }
+  // Generate time periods based on granularity
+  const periods = granularity === 'weekly'
+    ? eachWeekOfInterval({ start: firstDate, end: lastDate }, { weekStartsOn: 1 })
+    : eachMonthOfInterval({ start: firstDate, end: lastDate });
 
-  let cumulativeTransactions: Transaction[] = [];
+  const snapshots: PortfolioSnapshot[] = [];
 
-  for (const month of Array.from(monthlyGroups.keys()).sort()) {
-    cumulativeTransactions = [...cumulativeTransactions, ...(monthlyGroups.get(month) || [])];
+  for (const periodDate of periods) {
+    // Get all transactions up to and including this period
+    const transactionsUpToPeriod = sortedTransactions.filter((t) => t.date <= periodDate);
+    if (transactionsUpToPeriod.length === 0) continue;
 
-    const holdings = calculateHoldings(cumulativeTransactions, exchangeRates);
+    const holdings = calculateHoldings(transactionsUpToPeriod, exchangeRates);
 
-    // Build a price map for this specific month using historical data where available
-    const monthPrices = new Map<string, number>();
+    // Build date key for price lookup
+    const dateKey = granularity === 'weekly'
+      ? format(periodDate, 'yyyy-MM-dd')
+      : format(periodDate, 'yyyy-MM');
+
+    // Build a price map for this period using historical data
+    const periodPrices = new Map<string, number>();
     for (const h of holdings) {
-      const price = getMonthlyPrice(h.isin, month, historicalPrices, currentPrices);
-      if (price > 0) monthPrices.set(h.isin, price);
+      const price = getHistoricalPrice(h.isin, dateKey, historicalPrices, currentPrices);
+      if (price > 0) periodPrices.set(h.isin, price);
     }
 
-    const holdingsWithPrices = monthPrices.size > 0
-      ? updateHoldingsWithPrices(holdings, monthPrices, exchangeRates)
+    const holdingsWithPrices = periodPrices.size > 0
+      ? updateHoldingsWithPrices(holdings, periodPrices, exchangeRates)
       : holdings;
 
     const totalValue = holdingsWithPrices.reduce((sum, h) => sum + h.currentValue, 0);
@@ -202,7 +210,7 @@ export function calculateHistoricalSnapshots(
     const totalProfitLoss = totalValue - totalInvested;
 
     snapshots.push({
-      date: new Date(month + '-28'),
+      date: periodDate,
       totalValue,
       totalInvested,
       totalProfitLoss,
