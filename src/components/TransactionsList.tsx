@@ -105,10 +105,15 @@ export function TransactionsList() {
                     }`}
                   >
                     {transaction.type === 'sell' || transaction.type === 'dividend' ? '+' : '-'}
-                    {formatCurrency(transaction.totalAmount)}
+                    {formatCurrency(transaction.totalAmount, transaction.currency)}
                   </p>
+                  {transaction.currency !== 'EUR' && transaction.exchangeRate && (
+                    <p className="text-xs text-slate-500">
+                      ≈ {formatCurrency(transaction.totalAmount * transaction.exchangeRate)}
+                    </p>
+                  )}
                   {transaction.fees && (
-                    <p className="text-xs text-slate-500">Fee: {formatCurrency(transaction.fees)}</p>
+                    <p className="text-xs text-slate-500">Fee: {formatCurrency(transaction.fees, transaction.currency)}</p>
                   )}
                 </div>
                 <button
