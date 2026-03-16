@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { RefreshCw, Check, AlertCircle, Edit2, Plus, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { formatCurrency } from '../utils/calculations';
-import { fetchPrices, isinToTicker, registerIsinMapping, type PriceResult } from '../utils/priceApi';
+import { fetchPrices, fetchExchangeRate, isinToTicker, registerIsinMapping, type PriceResult } from '../utils/priceApi';
 
 export function AutoPriceUpdater() {
-  const { holdings, prices, updatePrices } = usePortfolio();
+  const { holdings, prices, exchangeRates, updatePrices, updateExchangeRates } = usePortfolio();
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<Map<string, PriceResult>>(new Map());
   const [editingIsin, setEditingIsin] = useState<string | null>(null);
@@ -33,6 +33,22 @@ export function AutoPriceUpdater() {
         }
       });
       updatePrices(newPrices);
+
+      // Auto-fetch exchange rates for every non-EUR currency across holdings
+      // and price results — this ensures SEK/USD prices are correctly converted to EUR
+      const currenciesNeeded = new Set<string>();
+      holdings.forEach((h) => { if (h.currency !== 'EUR') currenciesNeeded.add(h.currency); });
+      priceResults.forEach((r) => { if (!r.error && r.currency !== 'EUR') currenciesNeeded.add(r.currency); });
+
+      if (currenciesNeeded.size > 0) {
+        const newRates = new Map(exchangeRates);
+        for (const currency of currenciesNeeded) {
+          const rate = await fetchExchangeRate(currency);
+          if (rate) newRates.set(currency, rate);
+        }
+        updateExchangeRates(newRates);
+      }
+
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Failed to fetch prices:', error);
