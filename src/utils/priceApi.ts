@@ -41,7 +41,8 @@ const ISIN_TO_TICKER: Record<string, string> = {
   'US7427181091': 'PG',     // Procter & Gamble
 
   // Swedish Stocks
-  'SE0015811955': 'INVE-B.ST', // Investor AB Class B
+  'SE0015811955': 'INVE-B.ST', // Investor AB Class B (old ISIN)
+  'SE0015811963': 'INVE-B.ST', // Investor AB Class B (new ISIN after 2024 split)
   'SE0000107401': 'INVE-A.ST', // Investor AB Class A
   'SE0007525332': 'SWED-A.ST', // Swedbank
   'SE0000115446': 'VOLV-B.ST', // Volvo B
