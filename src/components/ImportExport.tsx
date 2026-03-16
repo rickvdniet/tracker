@@ -3,10 +3,10 @@ import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle, Wrench, L
 import { usePortfolio } from '../context/PortfolioContext';
 import { parseDeGiroTransactions, exportTransactionsToCSV } from '../utils/csvParser';
 import { exportAllData, importAllData, migrateTransactionCurrencies } from '../utils/storage';
-import { fetchExchangeRate } from '../utils/priceApi';
+import { fetchExchangeRate, fetchPrices, getPriceCurrency } from '../utils/priceApi';
 
 export function ImportExport() {
-  const { transactions, addTransactions, clearAll, exchangeRates, updateExchangeRates } = usePortfolio();
+  const { transactions, addTransactions, clearAll, exchangeRates, updateExchangeRates, prices, updatePrices } = usePortfolio();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -29,7 +29,8 @@ export function ImportExport() {
 
       addTransactions(newTransactions);
 
-      // Auto-fetch exchange rates for non-EUR currencies
+      // Collect unique ISINs and currencies
+      const isins = [...new Set(newTransactions.filter((t) => t.isin).map((t) => t.isin))];
       const currencies = new Set<string>();
       newTransactions.forEach((t) => {
         if (t.currency && t.currency !== 'EUR') {
@@ -37,21 +38,42 @@ export function ImportExport() {
         }
       });
 
+      // Fetch prices
+      if (isins.length > 0) {
+        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions. Fetching prices...` });
+        const priceResults = await fetchPrices(isins);
+        const newPrices = new Map(prices);
+        priceResults.forEach((result, isin) => {
+          if (!result.error && result.price > 0) {
+            newPrices.set(isin, result.price);
+            // Also collect currencies from price results
+            if (result.currency !== 'EUR') {
+              currencies.add(result.currency);
+            }
+          }
+        });
+        // Also infer currencies from ISINs
+        isins.forEach((isin) => {
+          const c = getPriceCurrency(isin);
+          if (c && c !== 'EUR') currencies.add(c);
+        });
+        updatePrices(newPrices);
+      }
+
+      // Fetch exchange rates
       if (currencies.size > 0) {
-        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions. Fetching exchange rates...` });
+        setStatus({ type: 'success', message: `Fetching exchange rates...` });
         const newRates = new Map(exchangeRates);
         for (const currency of currencies) {
           const rate = await fetchExchangeRate(currency);
           if (rate) {
             newRates.set(currency, rate);
-            console.log(`Fetched ${currency} rate:`, rate);
           }
         }
         updateExchangeRates(newRates);
-        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions with exchange rates` });
-      } else {
-        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions` });
       }
+
+      setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions` });
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to parse CSV file' });
       console.error(error);
