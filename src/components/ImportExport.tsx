@@ -1,33 +1,62 @@
 import { useRef, useState } from 'react';
-import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle, Wrench } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle, Wrench, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { parseDeGiroTransactions, exportTransactionsToCSV } from '../utils/csvParser';
 import { exportAllData, importAllData, migrateTransactionCurrencies } from '../utils/storage';
+import { fetchExchangeRate } from '../utils/priceApi';
 
 export function ImportExport() {
-  const { transactions, addTransactions, clearAll } = usePortfolio();
+  const { transactions, addTransactions, clearAll, exchangeRates, updateExchangeRates } = usePortfolio();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setIsImporting(true);
     try {
       const text = await file.text();
       const newTransactions = parseDeGiroTransactions(text);
 
       if (newTransactions.length === 0) {
         setStatus({ type: 'error', message: 'No valid transactions found in the file' });
+        setIsImporting(false);
         return;
       }
 
       addTransactions(newTransactions);
-      setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions` });
+
+      // Auto-fetch exchange rates for non-EUR currencies
+      const currencies = new Set<string>();
+      newTransactions.forEach((t) => {
+        if (t.currency && t.currency !== 'EUR') {
+          currencies.add(t.currency);
+        }
+      });
+
+      if (currencies.size > 0) {
+        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions. Fetching exchange rates...` });
+        const newRates = new Map(exchangeRates);
+        for (const currency of currencies) {
+          const rate = await fetchExchangeRate(currency);
+          if (rate) {
+            newRates.set(currency, rate);
+            console.log(`Fetched ${currency} rate:`, rate);
+          }
+        }
+        updateExchangeRates(newRates);
+        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions with exchange rates` });
+      } else {
+        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions` });
+      }
     } catch (error) {
       setStatus({ type: 'error', message: 'Failed to parse CSV file' });
       console.error(error);
+    } finally {
+      setIsImporting(false);
     }
 
     // Reset input
@@ -122,10 +151,11 @@ export function ImportExport() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors"
+            disabled={isImporting}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 text-white rounded-lg transition-colors"
           >
-            <Upload className="w-4 h-4" />
-            Import CSV
+            {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {isImporting ? 'Importing...' : 'Import CSV'}
           </button>
         </div>
 
