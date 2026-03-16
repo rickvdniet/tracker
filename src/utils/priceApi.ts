@@ -104,6 +104,7 @@ export function getCurrencyFromTicker(ticker: string): string | null {
 }
 
 export function getPriceCurrency(isin: string): string | null {
+  loadCustomMappings(); // Ensure custom mappings are loaded
   const ticker = isinToTicker(isin);
   return ticker ? getCurrencyFromTicker(ticker) : null;
 }
