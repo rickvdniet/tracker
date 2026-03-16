@@ -132,6 +132,7 @@ export function exportAllData(): string {
     transactions: loadTransactions().map(serializeTransaction),
     snapshots: loadSnapshots().map(serializeSnapshot),
     prices: Object.fromEntries(loadPrices()),
+    exchangeRates: Object.fromEntries(loadExchangeRates()),
     settings: loadSettings(),
     holdingMetadata: Object.fromEntries(loadHoldingMetadata()),
     exportDate: new Date().toISOString(),
@@ -160,6 +161,9 @@ export function importAllData(jsonString: string): boolean {
     }
     if (data.prices) {
       savePrices(data.prices);
+    }
+    if (data.exchangeRates) {
+      saveExchangeRates(new Map(Object.entries(data.exchangeRates)));
     }
     if (data.settings) {
       saveSettings(data.settings);
