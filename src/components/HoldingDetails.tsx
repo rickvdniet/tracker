@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { X, Tag, FileText, Save, Plus } from 'lucide-react';
+import { X, Tag, FileText, Save, Plus, TicketCheck } from 'lucide-react';
 import type { Holding, HoldingMetadata } from '../types';
 import { formatCurrency, formatPercent } from '../utils/calculations';
+import { isinToTicker, registerIsinMapping } from '../utils/priceApi';
 
 interface HoldingDetailsProps {
   holding: Holding;
@@ -47,6 +48,7 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
   const [sector, setSector] = useState(metadata?.sector || '');
   const [dividendYield, setDividendYield] = useState(metadata?.dividendYield?.toString() || '');
   const [newTag, setNewTag] = useState('');
+  const [ticker, setTicker] = useState(isinToTicker(holding.isin) ?? '');
 
   const handleAddTag = (tag: string) => {
     const normalizedTag = tag.trim();
@@ -61,6 +63,9 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
   };
 
   const handleSave = () => {
+    if (ticker.trim()) {
+      registerIsinMapping(holding.isin, ticker.trim().toUpperCase());
+    }
     onSave({
       isin: holding.isin,
       tags,
@@ -108,6 +113,24 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
               <p className="text-xs text-slate-400">Avg. Cost</p>
               <p className="text-lg font-semibold text-white">{formatCurrency(holding.averageCost)}</p>
             </div>
+          </div>
+
+          {/* Ticker */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+              <TicketCheck className="w-4 h-4" />
+              Yahoo Finance Ticker
+            </label>
+            <input
+              type="text"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              placeholder="e.g. INVE-B.ST or ASML.AS"
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-emerald-500 focus:border-emerald-500 font-mono text-sm"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Used for automatic price fetching. Find it on finance.yahoo.com.
+            </p>
           </div>
 
           {/* Sector */}
