@@ -93,6 +93,19 @@ export function updateHoldingsWithPrices(
     const priceCurrency = getPriceCurrency(holding.isin) ?? holding.currency;
     const rate = toEurRate(priceCurrency, exchangeRates);
     const currentValueEur = holding.quantity * priceLocal * rate;
+
+    // Debug SEK stocks
+    if (holding.isin && holding.isin.startsWith('SE')) {
+      console.log('SEK value calc:', {
+        isin: holding.isin,
+        holdingCurrency: holding.currency,
+        inferredPriceCurrency: getPriceCurrency(holding.isin),
+        finalPriceCurrency: priceCurrency,
+        rate,
+        priceLocal,
+        currentValueEur,
+      });
+    }
     const profitLoss = currentValueEur - holding.totalCost;
     const profitLossPercent = holding.totalCost > 0 ? (profitLoss / holding.totalCost) * 100 : 0;
 
