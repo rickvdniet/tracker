@@ -6,7 +6,7 @@ import { getPriceCurrency } from './priceApi';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DeGiroTransactionRow = Record<string, any>;
 
-// Column name mappings for different languages
+// Column name mappings for different languages and export formats
 const COLUMN_ALIASES: Record<string, string[]> = {
   date: ['Datum', 'Date', 'Fecha', 'Data'],
   time: ['Tijd', 'Time', 'Hora', 'Ora'],
@@ -18,12 +18,14 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   localValue: ['Lokale waarde', 'Local value', 'Valor local', 'Valore locale'],
   value: ['Waarde', 'Value', 'Valor', 'Valore'],
   exchangeRate: ['Wisselkoers', 'Exchange rate', 'Tipo de cambio', 'Tasso di cambio', 'FX Rate'],
-  fees: ['Transactiekosten en/of', 'Transaction costs', 'Transaction and/or', 'Costes de transacción'],
-  total: ['Totaal', 'Total'],
+  fees: ['Transactiekosten en/of', 'Transaction costs', 'Transaction and/or', 'Costes de transacción', 'Fees'],
+  total: ['Totaal', 'Total', 'Total Amount'],
   orderId: ['Order ID', 'Order Id'],
   description: ['Omschrijving', 'Description', 'Descripción', 'Descrizione'],
   mutation: ['Mutatie', 'Mutation', 'Change'],
   balance: ['Saldo', 'Balance'],
+  type: ['Type'],  // For re-importing tracker exports
+  currency: ['Currency'],  // For re-importing tracker exports
 };
 
 // Find the value for a field using any of its aliases
@@ -57,6 +59,12 @@ function parseDate(dateStr: string): Date {
 }
 
 function determineTransactionType(row: DeGiroTransactionRow): Transaction['type'] {
+  // If there's an explicit Type column (from tracker export), use it
+  const explicitType = getField(row, 'type')?.toLowerCase();
+  if (explicitType && ['buy', 'sell', 'dividend', 'fee', 'deposit', 'withdrawal'].includes(explicitType)) {
+    return explicitType as Transaction['type'];
+  }
+
   const description = (getField(row, 'description') || getField(row, 'product') || '').toLowerCase();
   const quantity = parseNumber(getField(row, 'quantity'));
   const total = parseNumber(getField(row, 'total') || getField(row, 'mutation'));
@@ -118,8 +126,16 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
       continue;
     }
 
-    // Infer currency from ISIN ticker mapping; DeGiro CSV doesn't include it
+    // Use explicit currency if present (tracker export), otherwise infer from ISIN
+    const explicitCurrency = getField(row, 'currency');
     const inferredCurrency = isin ? getPriceCurrency(isin) : null;
+    const currency = explicitCurrency || inferredCurrency || 'EUR';
+
+    // For tracker exports, quantity may already be negative for sells
+    const rawQuantity = parseNumber(getField(row, 'quantity'));
+    const finalQuantity = explicitCurrency
+      ? rawQuantity  // Tracker export: keep as-is (already signed correctly)
+      : (type === 'sell' ? -quantity : quantity);  // DeGiro: apply sign
 
     const transaction: Transaction = {
       id: generateId(),
@@ -127,10 +143,10 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
       type,
       product: product || description || '',
       isin,
-      quantity: type === 'sell' ? -quantity : quantity,
+      quantity: finalQuantity,
       price,
       totalAmount: Math.abs(total),
-      currency: inferredCurrency || 'EUR',
+      currency,
       exchangeRate: parseNumber(getField(row, 'exchangeRate')) || 1,
       fees: fees > 0 ? fees : undefined,
     };
