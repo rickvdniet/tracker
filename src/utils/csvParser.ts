@@ -159,7 +159,7 @@ export function parseDeGiroTransactions(csvContent: string): Transaction[] {
       price,
       totalAmount: Math.abs(total),
       currency,
-      exchangeRate: parseNumber(getField(row, 'exchangeRate')) || 1,
+      exchangeRate: parseNumber(getField(row, 'exchangeRate')) || undefined,
       fees: fees > 0 ? fees : undefined,
     };
 
@@ -223,6 +223,7 @@ export function exportTransactionsToCSV(transactions: Transaction[]): string {
     Price: t.price,
     'Total Amount': t.totalAmount,
     Currency: t.currency,
+    'Exchange rate': t.exchangeRate || '',
     Fees: t.fees || '',
   }));
 
