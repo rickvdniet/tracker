@@ -70,7 +70,7 @@ const initialState: PortfolioState = {
   historicalPrices: new Map(),
   holdingMetadata: new Map(),
   isLoading: true,
-  selectedTimeRange: 'ALL',
+  selectedTimeRange: '3M',
   chartGranularity: 'monthly',
 };
 
