@@ -1,12 +1,21 @@
 import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange } from '../types';
 import { subMonths, startOfYear, isAfter, format } from 'date-fns';
 
-export function calculateHoldings(transactions: Transaction[]): Holding[] {
+// Returns EUR per 1 unit of the given currency from the exchange rates map
+function toEurRate(currency: string, exchangeRates: Map<string, number>): number {
+  if (currency === 'EUR') return 1;
+  return exchangeRates.get(currency) ?? 1;
+}
+
+export function calculateHoldings(
+  transactions: Transaction[],
+  exchangeRates: Map<string, number> = new Map()
+): Holding[] {
   const holdingsMap = new Map<string, {
     product: string;
     isin: string;
     totalQuantity: number;
-    totalCost: number;
+    totalCostEur: number; // always stored in EUR
     currency: string;
   }>();
 
@@ -14,43 +23,47 @@ export function calculateHoldings(transactions: Transaction[]): Holding[] {
     if (transaction.type !== 'buy' && transaction.type !== 'sell') continue;
     if (!transaction.isin) continue;
 
+    // Exchange rate: prefer the one stored on the transaction, fall back to current rates map
+    const rate = transaction.currency === 'EUR'
+      ? 1
+      : (transaction.exchangeRate ?? toEurRate(transaction.currency, exchangeRates));
+
+    const costEur = (transaction.totalAmount + (transaction.fees || 0)) * rate;
     const existing = holdingsMap.get(transaction.isin);
 
     if (existing) {
       if (transaction.type === 'buy') {
         existing.totalQuantity += transaction.quantity;
-        existing.totalCost += transaction.totalAmount + (transaction.fees || 0);
+        existing.totalCostEur += costEur;
       } else {
-        // Sell: reduce quantity proportionally
-        const costPerShare = existing.totalCost / existing.totalQuantity;
+        const costPerShare = existing.totalCostEur / existing.totalQuantity;
         const quantitySold = Math.abs(transaction.quantity);
         existing.totalQuantity -= quantitySold;
-        existing.totalCost -= costPerShare * quantitySold;
+        existing.totalCostEur -= costPerShare * quantitySold;
       }
     } else if (transaction.type === 'buy') {
       holdingsMap.set(transaction.isin, {
         product: transaction.product,
         isin: transaction.isin,
         totalQuantity: transaction.quantity,
-        totalCost: transaction.totalAmount + (transaction.fees || 0),
+        totalCostEur: costEur,
         currency: transaction.currency,
       });
     }
   }
 
-  // Convert to Holding array, filtering out zero/negative quantities
   const holdings: Holding[] = [];
   for (const [, data] of holdingsMap) {
     if (data.totalQuantity > 0.0001) {
-      const averageCost = data.totalCost / data.totalQuantity;
+      const averageCostEur = data.totalCostEur / data.totalQuantity;
       holdings.push({
         product: data.product,
         isin: data.isin,
         quantity: data.totalQuantity,
-        averageCost,
-        totalCost: data.totalCost,
-        currentPrice: averageCost, // Will be updated when prices are provided
-        currentValue: data.totalCost,
+        averageCost: averageCostEur,      // EUR per share
+        totalCost: data.totalCostEur,     // total EUR invested
+        currentPrice: 0,                  // local currency — filled in by updateHoldingsWithPrices
+        currentValue: data.totalCostEur,  // EUR — defaults to cost (P/L = 0 until price is set)
         profitLoss: 0,
         profitLossPercent: 0,
         currency: data.currency,
@@ -63,18 +76,26 @@ export function calculateHoldings(transactions: Transaction[]): Holding[] {
 
 export function updateHoldingsWithPrices(
   holdings: Holding[],
-  prices: Map<string, number>
+  prices: Map<string, number>,
+  exchangeRates: Map<string, number> = new Map()
 ): Holding[] {
   return holdings.map((holding) => {
-    const currentPrice = prices.get(holding.isin) || holding.averageCost;
-    const currentValue = holding.quantity * currentPrice;
-    const profitLoss = currentValue - holding.totalCost;
-    const profitLossPercent = (profitLoss / holding.totalCost) * 100;
+    const priceLocal = prices.get(holding.isin);
+
+    // If no price is set yet, keep P/L at zero
+    if (priceLocal === undefined || priceLocal === 0) {
+      return { ...holding, currentPrice: 0, currentValue: holding.totalCost, profitLoss: 0, profitLossPercent: 0 };
+    }
+
+    const rate = toEurRate(holding.currency, exchangeRates);
+    const currentValueEur = holding.quantity * priceLocal * rate;
+    const profitLoss = currentValueEur - holding.totalCost;
+    const profitLossPercent = holding.totalCost > 0 ? (profitLoss / holding.totalCost) * 100 : 0;
 
     return {
       ...holding,
-      currentPrice,
-      currentValue,
+      currentPrice: priceLocal,       // local currency (for display in price updater)
+      currentValue: currentValueEur,  // EUR
       profitLoss,
       profitLossPercent,
     };
@@ -83,82 +104,66 @@ export function updateHoldingsWithPrices(
 
 export function calculatePortfolioStats(
   transactions: Transaction[],
-  holdings: Holding[]
+  holdings: Holding[],
+  exchangeRates: Map<string, number> = new Map()
 ): PortfolioStats {
-  let totalDeposits = 0;
-  let totalWithdrawals = 0;
   let totalDividends = 0;
   let totalFees = 0;
+  let totalDeposits = 0;
+  let totalWithdrawals = 0;
 
   for (const t of transactions) {
+    const rate = t.currency === 'EUR'
+      ? 1
+      : (t.exchangeRate ?? toEurRate(t.currency, exchangeRates));
+
     switch (t.type) {
-      case 'deposit':
-        totalDeposits += t.totalAmount;
-        break;
-      case 'withdrawal':
-        totalWithdrawals += t.totalAmount;
-        break;
-      case 'dividend':
-        totalDividends += t.totalAmount;
-        break;
-      case 'fee':
-        totalFees += t.totalAmount;
-        break;
+      case 'deposit':    totalDeposits    += t.totalAmount * rate; break;
+      case 'withdrawal': totalWithdrawals += t.totalAmount * rate; break;
+      case 'dividend':   totalDividends   += t.totalAmount * rate; break;
+      case 'fee':        totalFees        += t.totalAmount * rate; break;
     }
-    if (t.fees) {
-      totalFees += t.fees;
-    }
+    if (t.fees) totalFees += t.fees * rate;
   }
 
   const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   const totalInvested = holdings.reduce((sum, h) => sum + h.totalCost, 0);
   const totalProfitLoss = totalValue - totalInvested;
   const profitLossPercent = totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0;
-  const cashBalance = totalDeposits - totalWithdrawals + totalDividends - totalFees - totalInvested;
+  const cashBalance = Math.max(0, totalDeposits - totalWithdrawals + totalDividends - totalFees - totalInvested);
 
   return {
-    totalValue,
-    totalInvested,
-    totalProfitLoss,
-    profitLossPercent,
-    totalDividends,
-    totalFees,
-    cashBalance: Math.max(0, cashBalance),
-    numberOfHoldings: holdings.length,
+    totalValue, totalInvested, totalProfitLoss, profitLossPercent,
+    totalDividends, totalFees, cashBalance, numberOfHoldings: holdings.length,
   };
 }
 
 export function calculateHistoricalSnapshots(
   transactions: Transaction[],
-  currentPrices?: Map<string, number>
+  currentPrices?: Map<string, number>,
+  exchangeRates: Map<string, number> = new Map()
 ): PortfolioSnapshot[] {
   if (transactions.length === 0) return [];
 
   const snapshots: PortfolioSnapshot[] = [];
-  const sortedTransactions = [...transactions].sort(
-    (a, b) => a.date.getTime() - b.date.getTime()
-  );
+  const sortedTransactions = [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
 
-  // Group by month
   const monthlyGroups = new Map<string, Transaction[]>();
   for (const t of sortedTransactions) {
-    const monthKey = format(t.date, 'yyyy-MM');
-    const existing = monthlyGroups.get(monthKey) || [];
+    const key = format(t.date, 'yyyy-MM');
+    const existing = monthlyGroups.get(key) || [];
     existing.push(t);
-    monthlyGroups.set(monthKey, existing);
+    monthlyGroups.set(key, existing);
   }
 
-  // Calculate cumulative snapshot at end of each month
   let cumulativeTransactions: Transaction[] = [];
-  const sortedMonths = Array.from(monthlyGroups.keys()).sort();
 
-  for (const month of sortedMonths) {
-    const monthTransactions = monthlyGroups.get(month) || [];
-    cumulativeTransactions = [...cumulativeTransactions, ...monthTransactions];
+  for (const month of Array.from(monthlyGroups.keys()).sort()) {
+    cumulativeTransactions = [...cumulativeTransactions, ...(monthlyGroups.get(month) || [])];
 
-    const holdings = calculateHoldings(cumulativeTransactions);
+    const holdings = calculateHoldings(cumulativeTransactions, exchangeRates);
     const holdingsWithPrices = currentPrices
-      ? updateHoldingsWithPrices(holdings, currentPrices)
+      ? updateHoldingsWithPrices(holdings, currentPrices, exchangeRates)
       : holdings;
 
     const totalValue = holdingsWithPrices.reduce((sum, h) => sum + h.currentValue, 0);
@@ -166,7 +171,7 @@ export function calculateHistoricalSnapshots(
     const totalProfitLoss = totalValue - totalInvested;
 
     snapshots.push({
-      date: new Date(month + '-28'), // End of month approximation
+      date: new Date(month + '-28'),
       totalValue,
       totalInvested,
       totalProfitLoss,
@@ -178,85 +183,22 @@ export function calculateHistoricalSnapshots(
   return snapshots;
 }
 
-export function filterSnapshotsByTimeRange(
-  snapshots: PortfolioSnapshot[],
-  timeRange: TimeRange
-): PortfolioSnapshot[] {
+export function filterSnapshotsByTimeRange(snapshots: PortfolioSnapshot[], timeRange: TimeRange): PortfolioSnapshot[] {
   if (timeRange === 'ALL' || snapshots.length === 0) return snapshots;
 
   const now = new Date();
   let startDate: Date;
 
   switch (timeRange) {
-    case '1M':
-      startDate = subMonths(now, 1);
-      break;
-    case '3M':
-      startDate = subMonths(now, 3);
-      break;
-    case '6M':
-      startDate = subMonths(now, 6);
-      break;
-    case 'YTD':
-      startDate = startOfYear(now);
-      break;
-    case '1Y':
-      startDate = subMonths(now, 12);
-      break;
-    default:
-      return snapshots;
+    case '1M': startDate = subMonths(now, 1); break;
+    case '3M': startDate = subMonths(now, 3); break;
+    case '6M': startDate = subMonths(now, 6); break;
+    case 'YTD': startDate = startOfYear(now); break;
+    case '1Y': startDate = subMonths(now, 12); break;
+    default: return snapshots;
   }
 
   return snapshots.filter((s) => isAfter(s.date, startDate) || s.date.getTime() === startDate.getTime());
-}
-
-export function calculatePerformanceMetrics(snapshots: PortfolioSnapshot[]): {
-  absoluteReturn: number;
-  percentReturn: number;
-  bestMonth: { date: Date; return: number } | null;
-  worstMonth: { date: Date; return: number } | null;
-} {
-  if (snapshots.length < 2) {
-    return {
-      absoluteReturn: 0,
-      percentReturn: 0,
-      bestMonth: null,
-      worstMonth: null,
-    };
-  }
-
-  const first = snapshots[0];
-  const last = snapshots[snapshots.length - 1];
-  const absoluteReturn = last.totalValue - first.totalValue;
-  const percentReturn = first.totalValue > 0
-    ? ((last.totalValue - first.totalValue) / first.totalValue) * 100
-    : 0;
-
-  // Calculate monthly returns
-  let bestMonth: { date: Date; return: number } | null = null;
-  let worstMonth: { date: Date; return: number } | null = null;
-
-  for (let i = 1; i < snapshots.length; i++) {
-    const prev = snapshots[i - 1];
-    const curr = snapshots[i];
-    const monthReturn = prev.totalValue > 0
-      ? ((curr.totalValue - prev.totalValue) / prev.totalValue) * 100
-      : 0;
-
-    if (!bestMonth || monthReturn > bestMonth.return) {
-      bestMonth = { date: curr.date, return: monthReturn };
-    }
-    if (!worstMonth || monthReturn < worstMonth.return) {
-      worstMonth = { date: curr.date, return: monthReturn };
-    }
-  }
-
-  return {
-    absoluteReturn,
-    percentReturn,
-    bestMonth,
-    worstMonth,
-  };
 }
 
 export function formatCurrency(value: number, currency: string = 'EUR'): string {

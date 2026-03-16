@@ -14,6 +14,8 @@ import {
   loadPrices,
   saveHoldingMetadata,
   loadHoldingMetadata,
+  saveExchangeRates,
+  loadExchangeRates,
 } from '../utils/storage';
 
 interface PortfolioState {
@@ -22,6 +24,7 @@ interface PortfolioState {
   snapshots: PortfolioSnapshot[];
   stats: PortfolioStats;
   prices: Map<string, number>;
+  exchangeRates: Map<string, number>;
   holdingMetadata: Map<string, HoldingMetadata>;
   isLoading: boolean;
   selectedTimeRange: TimeRange;
@@ -33,6 +36,7 @@ type PortfolioAction =
   | { type: 'ADD_TRANSACTIONS'; payload: Transaction[] }
   | { type: 'DELETE_TRANSACTION'; payload: string }
   | { type: 'UPDATE_PRICES'; payload: Map<string, number> }
+  | { type: 'UPDATE_EXCHANGE_RATES'; payload: Map<string, number> }
   | { type: 'UPDATE_HOLDING_METADATA'; payload: HoldingMetadata }
   | { type: 'SET_HOLDING_METADATA'; payload: Map<string, HoldingMetadata> }
   | { type: 'SET_TIME_RANGE'; payload: TimeRange }
@@ -54,18 +58,19 @@ const initialState: PortfolioState = {
     numberOfHoldings: 0,
   },
   prices: new Map(),
+  exchangeRates: new Map(),
   holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: 'ALL',
 };
 
 function recalculateState(state: PortfolioState): PortfolioState {
-  const holdings = calculateHoldings(state.transactions);
+  const holdings = calculateHoldings(state.transactions, state.exchangeRates);
   const holdingsWithPrices = state.prices.size > 0
-    ? updateHoldingsWithPrices(holdings, state.prices)
+    ? updateHoldingsWithPrices(holdings, state.prices, state.exchangeRates)
     : holdings;
-  const stats = calculatePortfolioStats(state.transactions, holdingsWithPrices);
-  const snapshots = calculateHistoricalSnapshots(state.transactions, state.prices);
+  const stats = calculatePortfolioStats(state.transactions, holdingsWithPrices, state.exchangeRates);
+  const snapshots = calculateHistoricalSnapshots(state.transactions, state.prices, state.exchangeRates);
 
   return {
     ...state,
@@ -106,6 +111,11 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
       return recalculateState(newState);
     }
 
+    case 'UPDATE_EXCHANGE_RATES': {
+      const newState = { ...state, exchangeRates: action.payload };
+      return recalculateState(newState);
+    }
+
     case 'SET_TIME_RANGE':
       return { ...state, selectedTimeRange: action.payload };
 
@@ -136,6 +146,7 @@ interface PortfolioContextValue extends PortfolioState {
   addTransactions: (transactions: Transaction[]) => void;
   deleteTransaction: (id: string) => void;
   updatePrices: (prices: Map<string, number>) => void;
+  updateExchangeRates: (rates: Map<string, number>) => void;
   updateHoldingMetadata: (metadata: HoldingMetadata) => void;
   setTimeRange: (range: TimeRange) => void;
   clearAll: () => void;
@@ -152,7 +163,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     const transactions = loadTransactions();
     const prices = loadPrices();
     const metadata = loadHoldingMetadata();
+    const exchangeRates = loadExchangeRates();
 
+    dispatch({ type: 'UPDATE_EXCHANGE_RATES', payload: exchangeRates });
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
     dispatch({ type: 'SET_HOLDING_METADATA', payload: metadata });
     dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
@@ -174,6 +187,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   }, [state.prices, state.isLoading]);
 
   useEffect(() => {
+    if (!state.isLoading && state.exchangeRates.size > 0) {
+      saveExchangeRates(state.exchangeRates);
+    }
+  }, [state.exchangeRates, state.isLoading]);
+
+  useEffect(() => {
     if (!state.isLoading && state.holdingMetadata.size > 0) {
       saveHoldingMetadata(state.holdingMetadata);
     }
@@ -189,6 +208,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const updatePrices = useCallback((prices: Map<string, number>) => {
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
+  }, []);
+
+  const updateExchangeRates = useCallback((rates: Map<string, number>) => {
+    dispatch({ type: 'UPDATE_EXCHANGE_RATES', payload: rates });
   }, []);
 
   const updateHoldingMetadata = useCallback((metadata: HoldingMetadata) => {
@@ -214,6 +237,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     addTransactions,
     deleteTransaction,
     updatePrices,
+    updateExchangeRates,
     updateHoldingMetadata,
     setTimeRange,
     clearAll,
