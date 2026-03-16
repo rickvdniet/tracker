@@ -138,10 +138,31 @@ export function calculatePortfolioStats(
   };
 }
 
+// Look up the best available price for an ISIN in a given month.
+// Prefers the historical price for that exact month; falls back to the
+// most recent earlier month in history; then falls back to currentPrices.
+function getMonthlyPrice(
+  isin: string,
+  monthKey: string,
+  historicalPrices: Map<string, Array<{ date: string; price: number }>>,
+  currentPrices: Map<string, number>
+): number {
+  const history = historicalPrices.get(isin);
+  if (history && history.length > 0) {
+    const exact = history.find((p) => p.date === monthKey);
+    if (exact && exact.price > 0) return exact.price;
+    // Most recent available price up to (but not after) this month
+    const prior = history.filter((p) => p.date <= monthKey && p.price > 0);
+    if (prior.length > 0) return prior[prior.length - 1].price;
+  }
+  return currentPrices.get(isin) ?? 0;
+}
+
 export function calculateHistoricalSnapshots(
   transactions: Transaction[],
-  currentPrices?: Map<string, number>,
-  exchangeRates: Map<string, number> = new Map()
+  currentPrices: Map<string, number> = new Map(),
+  exchangeRates: Map<string, number> = new Map(),
+  historicalPrices: Map<string, Array<{ date: string; price: number }>> = new Map()
 ): PortfolioSnapshot[] {
   if (transactions.length === 0) return [];
 
@@ -162,8 +183,16 @@ export function calculateHistoricalSnapshots(
     cumulativeTransactions = [...cumulativeTransactions, ...(monthlyGroups.get(month) || [])];
 
     const holdings = calculateHoldings(cumulativeTransactions, exchangeRates);
-    const holdingsWithPrices = currentPrices
-      ? updateHoldingsWithPrices(holdings, currentPrices, exchangeRates)
+
+    // Build a price map for this specific month using historical data where available
+    const monthPrices = new Map<string, number>();
+    for (const h of holdings) {
+      const price = getMonthlyPrice(h.isin, month, historicalPrices, currentPrices);
+      if (price > 0) monthPrices.set(h.isin, price);
+    }
+
+    const holdingsWithPrices = monthPrices.size > 0
+      ? updateHoldingsWithPrices(holdings, monthPrices, exchangeRates)
       : holdings;
 
     const totalValue = holdingsWithPrices.reduce((sum, h) => sum + h.currentValue, 0);

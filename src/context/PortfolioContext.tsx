@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useState } from 'react';
 import type { Transaction, Holding, PortfolioSnapshot, PortfolioStats, TimeRange, HoldingMetadata } from '../types';
 import {
   calculateHoldings,
@@ -16,7 +16,10 @@ import {
   loadHoldingMetadata,
   saveExchangeRates,
   loadExchangeRates,
+  saveHistoricalPrices,
+  loadHistoricalPrices,
 } from '../utils/storage';
+import { fetchHistoricalPrices as fetchHistoricalPricesApi, isinToTicker } from '../utils/priceApi';
 
 interface PortfolioState {
   transactions: Transaction[];
@@ -25,6 +28,7 @@ interface PortfolioState {
   stats: PortfolioStats;
   prices: Map<string, number>;
   exchangeRates: Map<string, number>;
+  historicalPrices: Map<string, Array<{ date: string; price: number }>>;
   holdingMetadata: Map<string, HoldingMetadata>;
   isLoading: boolean;
   selectedTimeRange: TimeRange;
@@ -37,6 +41,7 @@ type PortfolioAction =
   | { type: 'DELETE_TRANSACTION'; payload: string }
   | { type: 'UPDATE_PRICES'; payload: Map<string, number> }
   | { type: 'UPDATE_EXCHANGE_RATES'; payload: Map<string, number> }
+  | { type: 'SET_HISTORICAL_PRICES'; payload: Map<string, Array<{ date: string; price: number }>> }
   | { type: 'UPDATE_HOLDING_METADATA'; payload: HoldingMetadata }
   | { type: 'SET_HOLDING_METADATA'; payload: Map<string, HoldingMetadata> }
   | { type: 'SET_TIME_RANGE'; payload: TimeRange }
@@ -59,6 +64,7 @@ const initialState: PortfolioState = {
   },
   prices: new Map(),
   exchangeRates: new Map(),
+  historicalPrices: new Map(),
   holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: 'ALL',
@@ -70,7 +76,7 @@ function recalculateState(state: PortfolioState): PortfolioState {
     ? updateHoldingsWithPrices(holdings, state.prices, state.exchangeRates)
     : holdings;
   const stats = calculatePortfolioStats(state.transactions, holdingsWithPrices, state.exchangeRates);
-  const snapshots = calculateHistoricalSnapshots(state.transactions, state.prices, state.exchangeRates);
+  const snapshots = calculateHistoricalSnapshots(state.transactions, state.prices, state.exchangeRates, state.historicalPrices);
 
   return {
     ...state,
@@ -116,6 +122,11 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
       return recalculateState(newState);
     }
 
+    case 'SET_HISTORICAL_PRICES': {
+      const newState = { ...state, historicalPrices: action.payload };
+      return recalculateState(newState);
+    }
+
     case 'SET_TIME_RANGE':
       return { ...state, selectedTimeRange: action.payload };
 
@@ -151,12 +162,15 @@ interface PortfolioContextValue extends PortfolioState {
   setTimeRange: (range: TimeRange) => void;
   clearAll: () => void;
   refreshData: () => void;
+  fetchHistoricalData: (isins: string[]) => Promise<void>;
+  historicalPricesLoading: boolean;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(portfolioReducer, initialState);
+  const [historicalPricesLoading, setHistoricalPricesLoading] = useState(false);
 
   // Load data from storage on mount
   useEffect(() => {
@@ -164,8 +178,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     const prices = loadPrices();
     const metadata = loadHoldingMetadata();
     const exchangeRates = loadExchangeRates();
+    const historicalPrices = loadHistoricalPrices();
 
     dispatch({ type: 'UPDATE_EXCHANGE_RATES', payload: exchangeRates });
+    dispatch({ type: 'SET_HISTORICAL_PRICES', payload: historicalPrices });
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
     dispatch({ type: 'SET_HOLDING_METADATA', payload: metadata });
     dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
@@ -232,6 +248,26 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'RECALCULATE' });
   }, []);
 
+  // Fetches monthly historical closing prices for each ISIN (via Yahoo Finance proxy)
+  // and caches them in storage. Calling with a subset of ISINs only re-fetches those.
+  const fetchHistoricalData = useCallback(async (isins: string[]) => {
+    setHistoricalPricesLoading(true);
+    const updated = new Map(state.historicalPrices);
+
+    for (const isin of isins) {
+      const ticker = isinToTicker(isin);
+      if (!ticker) continue;
+      const prices = await fetchHistoricalPricesApi(ticker);
+      if (prices.length > 0) updated.set(isin, prices);
+      // Small delay to avoid rate-limiting
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    dispatch({ type: 'SET_HISTORICAL_PRICES', payload: updated });
+    saveHistoricalPrices(updated);
+    setHistoricalPricesLoading(false);
+  }, [state.historicalPrices]);
+
   const value: PortfolioContextValue = {
     ...state,
     addTransactions,
@@ -242,6 +278,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setTimeRange,
     clearAll,
     refreshData,
+    fetchHistoricalData,
+    historicalPricesLoading,
   };
 
   return (
