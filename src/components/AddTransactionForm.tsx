@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, ChevronDown } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import type { Transaction } from '../types';
+
+const CURRENCIES = ['EUR', 'SEK', 'USD', 'GBP', 'NOK', 'DKK', 'CHF'];
 
 interface AddTransactionFormProps {
   onClose?: () => void;
 }
 
 export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
-  const { addTransactions } = usePortfolio();
+  const { addTransactions, holdings } = usePortfolio();
   const [isOpen, setIsOpen] = useState(false);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -18,9 +20,22 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
     quantity: '',
     price: '',
     fees: '',
+    currency: 'EUR',
     notes: '',
   });
   const [error, setError] = useState('');
+
+  const handleSelectHolding = (isin: string) => {
+    const holding = holdings.find((h) => h.isin === isin);
+    if (holding) {
+      setFormData((prev) => ({
+        ...prev,
+        product: holding.product,
+        isin: holding.isin,
+        currency: holding.currency || 'EUR',
+      }));
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,14 +68,13 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       quantity: formData.type === 'sell' ? -Math.abs(quantity) : quantity,
       price,
       totalAmount,
-      currency: 'EUR',
+      currency: formData.currency,
       fees: fees > 0 ? fees : undefined,
       notes: formData.notes.trim() || undefined,
     };
 
     addTransactions([transaction]);
 
-    // Reset form
     setFormData({
       date: new Date().toISOString().split('T')[0],
       type: 'buy',
@@ -69,6 +83,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       quantity: '',
       price: '',
       fees: '',
+      currency: 'EUR',
       notes: '',
     });
 
@@ -118,6 +133,31 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+
+        {/* Existing holding picker */}
+        {holdings.length > 0 && (formData.type === 'buy' || formData.type === 'sell' || formData.type === 'dividend') && (
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">
+              Pick from existing holdings <span className="text-slate-500">(optional)</span>
+            </label>
+            <div className="relative">
+              <select
+                onChange={(e) => handleSelectHolding(e.target.value)}
+                value={formData.isin}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white appearance-none focus:ring-emerald-500 focus:border-emerald-500 pr-8"
+              >
+                <option value="">— select a stock —</option>
+                {holdings.map((h) => (
+                  <option key={h.isin} value={h.isin}>
+                    {h.product} ({h.isin})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-slate-400 mb-1">Date</label>
@@ -151,7 +191,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
             type="text"
             value={formData.product}
             onChange={(e) => setFormData({ ...formData, product: e.target.value })}
-            placeholder="e.g., Apple Inc."
+            placeholder="e.g., Investor AB"
             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-emerald-500 focus:border-emerald-500"
           />
         </div>
@@ -162,9 +202,29 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
             type="text"
             value={formData.isin}
             onChange={(e) => setFormData({ ...formData, isin: e.target.value })}
-            placeholder="e.g., US0378331005"
+            placeholder="e.g., SE0015811955"
             className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-emerald-500 focus:border-emerald-500"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">Currency</label>
+          <div className="grid grid-cols-4 gap-2">
+            {CURRENCIES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setFormData({ ...formData, currency: c })}
+                className={`py-2 text-sm rounded-lg border transition-colors font-medium ${
+                  formData.currency === c
+                    ? 'bg-emerald-600 border-emerald-500 text-white'
+                    : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
         </div>
 
         {(formData.type === 'buy' || formData.type === 'sell') && (
@@ -182,7 +242,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
               />
             </div>
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Price per share *</label>
+              <label className="block text-sm text-slate-400 mb-1">Price ({formData.currency}) *</label>
               <input
                 type="number"
                 value={formData.price}
@@ -198,7 +258,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
 
         {(formData.type === 'dividend' || formData.type === 'deposit' || formData.type === 'withdrawal' || formData.type === 'fee') && (
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Amount *</label>
+            <label className="block text-sm text-slate-400 mb-1">Amount ({formData.currency}) *</label>
             <input
               type="number"
               value={formData.price}
@@ -213,7 +273,7 @@ export function AddTransactionForm({ onClose }: AddTransactionFormProps) {
 
         {(formData.type === 'buy' || formData.type === 'sell') && (
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Transaction Fees</label>
+            <label className="block text-sm text-slate-400 mb-1">Transaction Fees ({formData.currency})</label>
             <input
               type="number"
               value={formData.fees}
