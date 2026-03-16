@@ -192,7 +192,7 @@ export function AutoPriceUpdater() {
                     onClick={() => handleManualEdit(holding.isin, holding.currentPrice)}
                     className="flex items-center gap-1 text-sm text-slate-300 hover:text-white group"
                   >
-                    <span>{formatCurrency(holding.currentPrice)}</span>
+                    <span>{formatCurrency(holding.currentPrice, holding.currency)}</span>
                     <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
                 )}
