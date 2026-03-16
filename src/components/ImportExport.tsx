@@ -29,7 +29,7 @@ export function ImportExport() {
 
       addTransactions(newTransactions);
 
-      // Collect unique ISINs and currencies
+      // Collect unique ISINs and currencies (infer from ISINs for accuracy)
       const isins = [...new Set(newTransactions.filter((t) => t.isin).map((t) => t.isin))];
       const currencies = new Set<string>();
       newTransactions.forEach((t) => {
@@ -37,32 +37,15 @@ export function ImportExport() {
           currencies.add(t.currency);
         }
       });
+      // Infer currencies from ISINs (more reliable than CSV data)
+      isins.forEach((isin) => {
+        const c = getPriceCurrency(isin);
+        if (c && c !== 'EUR') currencies.add(c);
+      });
 
-      // Fetch prices
-      if (isins.length > 0) {
-        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions. Fetching prices...` });
-        const priceResults = await fetchPrices(isins);
-        const newPrices = new Map(prices);
-        priceResults.forEach((result, isin) => {
-          if (!result.error && result.price > 0) {
-            newPrices.set(isin, result.price);
-            // Also collect currencies from price results
-            if (result.currency !== 'EUR') {
-              currencies.add(result.currency);
-            }
-          }
-        });
-        // Also infer currencies from ISINs
-        isins.forEach((isin) => {
-          const c = getPriceCurrency(isin);
-          if (c && c !== 'EUR') currencies.add(c);
-        });
-        updatePrices(newPrices);
-      }
-
-      // Fetch exchange rates
+      // Fetch exchange rates FIRST (needed for correct price calculations)
       if (currencies.size > 0) {
-        setStatus({ type: 'success', message: `Fetching exchange rates...` });
+        setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions. Fetching exchange rates...` });
         const newRates = new Map(exchangeRates);
         for (const currency of currencies) {
           const rate = await fetchExchangeRate(currency);
@@ -71,6 +54,19 @@ export function ImportExport() {
           }
         }
         updateExchangeRates(newRates);
+      }
+
+      // Then fetch prices (will use correct exchange rates for calculations)
+      if (isins.length > 0) {
+        setStatus({ type: 'success', message: `Fetching prices...` });
+        const priceResults = await fetchPrices(isins);
+        const newPrices = new Map(prices);
+        priceResults.forEach((result, isin) => {
+          if (!result.error && result.price > 0) {
+            newPrices.set(isin, result.price);
+          }
+        });
+        updatePrices(newPrices);
       }
 
       setStatus({ type: 'success', message: `Imported ${newTransactions.length} transactions` });
