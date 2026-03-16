@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'degiro_settings',
   HOLDING_METADATA: 'degiro_holding_metadata',
   EXCHANGE_RATES: 'degiro_exchange_rates',
+  HISTORICAL_PRICES: 'degiro_historical_prices',
 } as const;
 
 function safeJSONParse<T>(value: string | null, fallback: T): T {
@@ -87,6 +88,16 @@ export function saveSettings(settings: Record<string, unknown>): void {
 export function loadSettings(): Record<string, unknown> {
   const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
   return safeJSONParse(data, {});
+}
+
+export function saveHistoricalPrices(prices: Map<string, Array<{ date: string; price: number }>>): void {
+  localStorage.setItem(STORAGE_KEYS.HISTORICAL_PRICES, JSON.stringify(Object.fromEntries(prices)));
+}
+
+export function loadHistoricalPrices(): Map<string, Array<{ date: string; price: number }>> {
+  const data = localStorage.getItem(STORAGE_KEYS.HISTORICAL_PRICES);
+  const parsed = safeJSONParse<Record<string, Array<{ date: string; price: number }>>>(data, {});
+  return new Map(Object.entries(parsed));
 }
 
 export function saveExchangeRates(rates: Map<string, number>): void {

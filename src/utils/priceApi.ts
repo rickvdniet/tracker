@@ -151,6 +151,51 @@ export async function fetchPrice(isin: string): Promise<PriceResult> {
   };
 }
 
+// Fetch monthly historical closing prices for a ticker symbol
+// Returns array of { date: 'yyyy-MM', price } sorted oldest → newest
+export async function fetchHistoricalPrices(
+  ticker: string,
+  rangeYears: number = 5
+): Promise<Array<{ date: string; price: number }>> {
+  const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1wk&range=${rangeYears}y`;
+  const proxies = [
+    'https://corsproxy.io/?url=',
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
+
+  for (const proxy of proxies) {
+    try {
+      const response = await fetch(proxy + encodeURIComponent(targetUrl), {
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const result = (data as { chart?: { result?: { timestamp: number[]; indicators: { adjclose?: { adjclose: (number | null)[] }[]; quote: { close: (number | null)[] }[] } }[] } }).chart?.result?.[0];
+      if (!result) continue;
+
+      const timestamps: number[] = result.timestamp || [];
+      const closes: (number | null)[] =
+        result.indicators?.adjclose?.[0]?.adjclose ||
+        result.indicators?.quote?.[0]?.close || [];
+
+      const points: Array<{ date: string; price: number }> = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        const price = closes[i];
+        if (price == null || price <= 0) continue;
+        // Format as yyyy-MM-dd (week start date)
+        const d = new Date(timestamps[i] * 1000);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        points.push({ date: dateStr, price });
+      }
+      if (points.length > 0) return points;
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+
 // Fetch EUR per 1 unit of the given currency (e.g. 'SEK' → ~0.088)
 export async function fetchExchangeRate(currency: string): Promise<number | null> {
   if (currency === 'EUR') return 1;

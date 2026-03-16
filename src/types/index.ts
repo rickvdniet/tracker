@@ -105,3 +105,8 @@ export interface ParsedDeGiroRow {
 }
 
 export type TimeRange = '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL';
+
+export interface HistoricalPricePoint {
+  date: string;  // 'yyyy-MM' format
+  price: number; // local currency
+}
