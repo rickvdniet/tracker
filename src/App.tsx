@@ -13,7 +13,8 @@ import {
   PerformanceBenchmark,
   AutoPriceUpdater,
 } from './components';
-import { LayoutDashboard, Coins, TrendingUp, Settings } from 'lucide-react';
+import { LayoutDashboard, Coins, TrendingUp, Settings, Check } from 'lucide-react';
+import { getCustomProxyUrl, setCustomProxyUrl } from './utils/priceApi';
 import './index.css';
 
 type Tab = 'portfolio' | 'dividends' | 'benchmark' | 'settings';
@@ -106,6 +107,82 @@ function BenchmarkView() {
   );
 }
 
+function ProxySettings() {
+  const [url, setUrl] = useState(getCustomProxyUrl().replace(/\/\?url=$/, '').replace(/\/$/, ''));
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    setCustomProxyUrl(url);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h3 className="text-lg font-semibold text-white mb-1">Price Fetch Proxy</h3>
+      <p className="text-sm text-slate-400 mb-4">
+        Yahoo Finance blocks direct browser requests (CORS). A personal Cloudflare Worker
+        proxy bypasses this reliably for free.
+      </p>
+
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">Your Worker URL</label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://my-proxy.yourname.workers.dev"
+              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:ring-emerald-500 focus:border-emerald-500"
+            />
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition-colors"
+            >
+              {saved ? <Check className="w-4 h-4" /> : null}
+              {saved ? 'Saved' : 'Save'}
+            </button>
+          </div>
+          {url && (
+            <p className="text-xs text-slate-500 mt-1">
+              Will call: {url.replace(/\/$/, '')}/?url=&lt;encoded Yahoo Finance URL&gt;
+            </p>
+          )}
+        </div>
+
+        <div className="pt-3 border-t border-slate-700">
+          <p className="text-sm font-medium text-slate-300 mb-2">How to set up (free, ~5 min):</p>
+          <ol className="text-sm text-slate-400 space-y-1 list-decimal list-inside">
+            <li>Go to <span className="text-emerald-400">cloudflare.com</span> and create a free account</li>
+            <li>Open <span className="text-white">Workers &amp; Pages</span> → <span className="text-white">Create</span> → <span className="text-white">Hello World</span> Worker</li>
+            <li>Replace the worker code with the snippet below and click <span className="text-white">Deploy</span></li>
+            <li>Copy the worker URL (e.g. <span className="text-slate-300">https://my-proxy.name.workers.dev</span>) and paste it above</li>
+          </ol>
+          <pre className="mt-3 bg-slate-900 rounded-lg p-3 text-xs text-slate-300 overflow-x-auto whitespace-pre">{`export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const target = url.searchParams.get('url');
+    if (!target) return new Response('Missing url param', { status: 400 });
+    const resp = await fetch(decodeURIComponent(target), {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const body = await resp.text();
+    return new Response(body, {
+      status: resp.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  },
+};`}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsView() {
   return (
     <>
@@ -115,6 +192,7 @@ function SettingsView() {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ImportExport />
+        <ProxySettings />
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
           <h3 className="text-lg font-semibold text-white mb-4">About</h3>
           <div className="space-y-3 text-sm text-slate-400">
