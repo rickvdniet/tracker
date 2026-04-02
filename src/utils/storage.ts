@@ -165,9 +165,7 @@ export function importAllData(jsonString: string): boolean {
       });
       saveTransactions(transactions);
     }
-    if (data.snapshots) {
-      saveSnapshots(data.snapshots.map(deserializeSnapshot));
-    }
+    // Snapshots are derived data, no need to import (they'll be recalculated)
     if (data.prices) {
       savePrices(data.prices);
     }

@@ -10,7 +10,6 @@ import {
 import {
   saveTransactions,
   loadTransactions,
-  saveSnapshots,
   savePrices,
   loadPrices,
   saveHoldingMetadata,
@@ -190,6 +189,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   // Load data from storage on mount
   useEffect(() => {
+    // Clean up old snapshot storage (snapshots are now always recalculated)
+    localStorage.removeItem('degiro_snapshots');
+
     const transactions = loadTransactions();
     const prices = loadPrices();
     const metadata = loadHoldingMetadata();
@@ -204,13 +206,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SET_LOADING', payload: false });
   }, []);
 
-  // Save data to storage when it changes
+  // Save transactions to storage when they change (snapshots are derived, no need to save)
   useEffect(() => {
     if (!state.isLoading) {
       saveTransactions(state.transactions);
-      saveSnapshots(state.snapshots);
     }
-  }, [state.transactions, state.snapshots, state.isLoading]);
+  }, [state.transactions, state.isLoading]);
 
   useEffect(() => {
     if (!state.isLoading && state.prices.size > 0) {
@@ -261,7 +262,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const clearAll = useCallback(() => {
     dispatch({ type: 'CLEAR_ALL' });
     saveTransactions([]);
-    saveSnapshots([]);
+    localStorage.removeItem('degiro_snapshots'); // Clean up old stored snapshots
   }, []);
 
   const refreshData = useCallback(() => {
