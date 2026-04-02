@@ -189,6 +189,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   // Load data from storage on mount
   useEffect(() => {
+    // Clean up old snapshot storage (snapshots are now always recalculated)
+    localStorage.removeItem('degiro_snapshots');
+
     const transactions = loadTransactions();
     const prices = loadPrices();
     const metadata = loadHoldingMetadata();
