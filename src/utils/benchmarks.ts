@@ -1,11 +1,13 @@
-import type { PortfolioSnapshot, BenchmarkData } from '../types';
-import { format } from 'date-fns';
+import type { Transaction } from '../types';
+import { format, subMonths, startOfYear, isAfter } from 'date-fns';
 import { fetchHistoricalPrices } from './priceApi';
+import type { TimeRange } from '../types';
 
 // Benchmark tickers - Yahoo Finance symbols
+// EUR-denominated UCITS ETFs so comparisons stay in EUR without extra FX conversion
 export const BENCHMARK_TICKERS = {
-  sp500: 'CSPX.AS',   // iShares Core S&P 500 UCITS (EUR-denominated for consistency)
-  msciWorld: 'IWDA.AS', // iShares Core MSCI World UCITS (EUR-denominated)
+  sp500: 'CSPX.AS',
+  msciWorld: 'IWDA.AS',
 } as const;
 
 export interface BenchmarkPrices {
@@ -13,7 +15,6 @@ export interface BenchmarkPrices {
   msciWorld: Array<{ date: string; price: number }>;
 }
 
-// Fetch historical weekly prices for both benchmarks in parallel
 export async function fetchBenchmarkPrices(rangeYears: number = 10): Promise<BenchmarkPrices> {
   const [sp500, msciWorld] = await Promise.all([
     fetchHistoricalPrices(BENCHMARK_TICKERS.sp500, rangeYears),
@@ -33,88 +34,163 @@ function priceOnOrBefore(
   return eligible[eligible.length - 1].price;
 }
 
-// Build benchmark comparison chart data using real historical prices.
-// Only snapshots that fall within the benchmark data range are included —
-// this prevents flat/wrong-looking charts when snapshots span outside
-// benchmark coverage or have corrupted dates.
+// Convert a transaction to EUR using stored rate or the fallback rates map
+function toEurAmount(tx: Transaction, exchangeRates: Map<string, number>): number {
+  const rate = tx.currency === 'EUR'
+    ? 1
+    : (tx.exchangeRate ?? exchangeRates.get(tx.currency) ?? 1);
+  return (tx.totalAmount + (tx.fees ?? 0)) * rate;
+}
+
+/**
+ * Simulate a benchmark portfolio using the user's actual cashflows.
+ * For each buy transaction, we "buy" fractional shares of the benchmark
+ * ETF using its price on that transaction's date. Then value the position
+ * at the asOfDate price.
+ */
+export interface CashflowSimulation {
+  totalShares: number;
+  totalInvested: number; // EUR — sum of buys up to asOfDate
+  currentValue: number;  // EUR — totalShares × price at asOfDate
+}
+
+export function simulateBenchmarkAt(
+  transactions: Transaction[],
+  benchmarkPrices: Array<{ date: string; price: number }>,
+  exchangeRates: Map<string, number>,
+  asOfDate: Date
+): CashflowSimulation {
+  const asOfKey = format(asOfDate, 'yyyy-MM-dd');
+  let totalShares = 0;
+  let totalInvested = 0;
+
+  for (const tx of transactions) {
+    if (tx.type !== 'buy') continue;
+    if (tx.date > asOfDate) continue;
+
+    const txKey = format(tx.date, 'yyyy-MM-dd');
+    const priceAtBuy = priceOnOrBefore(benchmarkPrices, txKey);
+    if (!priceAtBuy) continue;
+
+    const eurAmount = toEurAmount(tx, exchangeRates);
+    totalShares += eurAmount / priceAtBuy;
+    totalInvested += eurAmount;
+  }
+
+  const currentPrice = priceOnOrBefore(benchmarkPrices, asOfKey) ?? 0;
+  const currentValue = totalShares * currentPrice;
+
+  return { totalShares, totalInvested, currentValue };
+}
+
+// Filter transactions/dates to a time range
+export function filterDateRangeStart(range: TimeRange): Date | null {
+  if (range === 'ALL') return null;
+  const now = new Date();
+  switch (range) {
+    case '1M':  return subMonths(now, 1);
+    case '3M':  return subMonths(now, 3);
+    case '6M':  return subMonths(now, 6);
+    case 'YTD': return startOfYear(now);
+    case '1Y':  return subMonths(now, 12);
+    default:    return null;
+  }
+}
+
+export interface BenchmarkChartPoint {
+  date: string;
+  portfolioValue: number;    // EUR
+  sp500Value: number;        // EUR — same money into S&P 500 instead
+  msciWorldValue: number;    // EUR — same money into MSCI World instead
+  totalInvested: number;     // EUR — cash contributed so far
+}
+
+/**
+ * Build the cashflow-matched comparison chart.
+ * For each snapshot's date, computes what the portfolio would be worth if
+ * the same cashflows had been directed into the benchmark ETFs instead.
+ */
 export function calculateBenchmarkComparison(
-  snapshots: PortfolioSnapshot[],
-  benchmarks: BenchmarkPrices
-): BenchmarkData[] {
+  transactions: Transaction[],
+  snapshots: Array<{ date: Date; totalValue: number; totalInvested: number }>,
+  benchmarks: BenchmarkPrices,
+  exchangeRates: Map<string, number>,
+  timeRange: TimeRange = 'ALL'
+): BenchmarkChartPoint[] {
   if (snapshots.length === 0 || benchmarks.sp500.length === 0) return [];
 
-  // Determine the valid overlap window between snapshots and benchmark data
-  const benchmarkStart = benchmarks.sp500[0].date; // earliest benchmark date
-  const now = new Date();
-  const nowKey = format(now, 'yyyy-MM-dd');
-
-  // Filter snapshots to only those within benchmark coverage and reasonable date range
+  // Restrict to snapshots with sane dates AND with any transactions (i.e. portfolio existed)
   const validSnapshots = snapshots.filter((s) => {
-    const dateStr = format(s.date, 'yyyy-MM-dd');
-    const year = s.date.getFullYear();
-    return year >= 2000 && year <= 2100 && dateStr >= benchmarkStart && dateStr <= nowKey;
+    const y = s.date.getFullYear();
+    return y >= 2000 && y <= 2100 && s.totalInvested > 0;
   });
-
   if (validSnapshots.length === 0) return [];
 
-  // Base the comparison on the first VALID snapshot
-  const firstSnapshotDate = format(validSnapshots[0].date, 'yyyy-MM-dd');
-  const sp500Base = priceOnOrBefore(benchmarks.sp500, firstSnapshotDate)
-    ?? benchmarks.sp500[0]?.price ?? null;
-  const msciBase = priceOnOrBefore(benchmarks.msciWorld, firstSnapshotDate)
-    ?? benchmarks.msciWorld[0]?.price ?? null;
+  // Apply time range filter
+  const rangeStart = filterDateRangeStart(timeRange);
+  const filtered = rangeStart
+    ? validSnapshots.filter((s) => isAfter(s.date, rangeStart) || s.date.getTime() === rangeStart.getTime())
+    : validSnapshots;
+  if (filtered.length === 0) return [];
 
-  // Rebase portfolio too — subtract the first valid snapshot's profitLossPercent
-  // so the chart starts at 100 for all three lines
-  const portfolioBaseline = validSnapshots[0].profitLossPercent;
+  // Sort transactions by date for the simulation
+  const sortedTx = [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
 
-  return validSnapshots.map((snapshot) => {
-    const dateStr = format(snapshot.date, 'yyyy-MM-dd');
-    const portfolioValue = 100 + (snapshot.profitLossPercent - portfolioBaseline);
+  return filtered.map((snapshot) => {
+    const sp500Sim = simulateBenchmarkAt(sortedTx, benchmarks.sp500, exchangeRates, snapshot.date);
+    const msciSim  = simulateBenchmarkAt(sortedTx, benchmarks.msciWorld, exchangeRates, snapshot.date);
 
-    let sp500 = 100;
-    let msciWorld = 100;
-
-    if (sp500Base) {
-      const price = priceOnOrBefore(benchmarks.sp500, dateStr);
-      if (price) sp500 = (price / sp500Base) * 100;
-    }
-
-    if (msciBase) {
-      const price = priceOnOrBefore(benchmarks.msciWorld, dateStr);
-      if (price) msciWorld = (price / msciBase) * 100;
-    }
-
-    return { date: dateStr, portfolioValue, sp500, msciWorld };
+    return {
+      date: format(snapshot.date, 'yyyy-MM-dd'),
+      portfolioValue: snapshot.totalValue,
+      sp500Value: sp500Sim.currentValue,
+      msciWorldValue: msciSim.currentValue,
+      totalInvested: snapshot.totalInvested,
+    };
   });
 }
 
-export function calculatePerformanceVsBenchmark(
-  snapshots: PortfolioSnapshot[],
-  benchmarks: BenchmarkPrices
-): {
-  portfolioReturn: number;
+export interface BenchmarkPerformance {
+  portfolioValue: number;       // EUR at end
+  portfolioReturn: number;      // % return on invested capital
+  sp500Value: number;           // EUR simulated
   sp500Return: number;
+  msciWorldValue: number;       // EUR simulated
   msciWorldReturn: number;
-  alpha: number;
+  totalInvested: number;        // EUR contributed in period
+  alpha: number;                // portfolio return - sp500 return, percentage points
   outperforming: boolean;
-} {
-  const benchmarkData = calculateBenchmarkComparison(snapshots, benchmarks);
-  if (benchmarkData.length < 2) {
-    return { portfolioReturn: 0, sp500Return: 0, msciWorldReturn: 0, alpha: 0, outperforming: false };
+}
+
+export function calculatePerformanceVsBenchmark(
+  chartData: BenchmarkChartPoint[]
+): BenchmarkPerformance {
+  if (chartData.length === 0) {
+    return {
+      portfolioValue: 0, portfolioReturn: 0,
+      sp500Value: 0, sp500Return: 0,
+      msciWorldValue: 0, msciWorldReturn: 0,
+      totalInvested: 0, alpha: 0, outperforming: false,
+    };
   }
 
-  const last = benchmarkData[benchmarkData.length - 1];
-  // All three are already normalized to 100 at start in calculateBenchmarkComparison
-  const portfolioReturn = last.portfolioValue - 100;
-  const sp500Return = last.sp500 - 100;
-  const msciWorldReturn = last.msciWorld - 100;
+  const last = chartData[chartData.length - 1];
+  const invested = last.totalInvested;
+
+  // Return = (final value - invested) / invested. Same denominator for all three.
+  const portfolioReturn  = invested > 0 ? ((last.portfolioValue  - invested) / invested) * 100 : 0;
+  const sp500Return      = invested > 0 ? ((last.sp500Value      - invested) / invested) * 100 : 0;
+  const msciWorldReturn  = invested > 0 ? ((last.msciWorldValue  - invested) / invested) * 100 : 0;
   const alpha = portfolioReturn - sp500Return;
 
   return {
+    portfolioValue: last.portfolioValue,
     portfolioReturn,
+    sp500Value: last.sp500Value,
     sp500Return,
+    msciWorldValue: last.msciWorldValue,
     msciWorldReturn,
+    totalInvested: invested,
     alpha,
     outperforming: portfolioReturn > sp500Return,
   };
