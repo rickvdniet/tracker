@@ -197,14 +197,29 @@ export function calculateHistoricalSnapshots(
 ): PortfolioSnapshot[] {
   if (transactions.length === 0) return [];
 
-  const sortedTransactions = [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
+  // Ignore transactions with dates outside a sensible range (corrupted data).
+  // Otherwise a stray 1928 tx would push snapshots back a century.
+  const validTransactions = transactions.filter((t) => {
+    const y = t.date.getFullYear();
+    return y >= 2000 && y <= 2100;
+  });
+  if (validTransactions.length === 0) return [];
+
+  const sortedTransactions = [...validTransactions].sort((a, b) => a.date.getTime() - b.date.getTime());
   const firstDate = sortedTransactions[0].date;
   const lastDate = max([sortedTransactions[sortedTransactions.length - 1].date, new Date()]);
 
   // Generate time periods based on granularity
-  const periods = granularity === 'weekly'
+  const intervalPeriods = granularity === 'weekly'
     ? eachWeekOfInterval({ start: firstDate, end: lastDate }, { weekStartsOn: 1 })
     : eachMonthOfInterval({ start: firstDate, end: lastDate });
+
+  // Ensure the exact first transaction date appears as a snapshot point,
+  // so the chart's ALL view starts on the first investment (not the next
+  // week/month boundary after it).
+  const firstDateKey = format(firstDate, 'yyyy-MM-dd');
+  const alreadyIncluded = intervalPeriods.some((p) => format(p, 'yyyy-MM-dd') === firstDateKey);
+  const periods = alreadyIncluded ? intervalPeriods : [firstDate, ...intervalPeriods];
 
   const snapshots: PortfolioSnapshot[] = [];
 
