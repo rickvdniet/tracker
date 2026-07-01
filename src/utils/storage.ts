@@ -10,7 +10,32 @@ const STORAGE_KEYS = {
   HOLDING_METADATA: 'degiro_holding_metadata',
   EXCHANGE_RATES: 'degiro_exchange_rates',
   HISTORICAL_PRICES: 'degiro_historical_prices',
+  BENCHMARK_PRICES: 'degiro_benchmark_prices',
 } as const;
+
+// Benchmark prices are cached for 6 hours to avoid excessive Yahoo Finance calls
+export const BENCHMARK_CACHE_MS = 6 * 60 * 60 * 1000;
+
+export interface CachedBenchmarks {
+  sp500: Array<{ date: string; price: number }>;
+  msciWorld: Array<{ date: string; price: number }>;
+  fetchedAt: number; // Date.now() at time of fetch
+}
+
+export function saveBenchmarkPrices(cached: CachedBenchmarks): void {
+  localStorage.setItem(STORAGE_KEYS.BENCHMARK_PRICES, JSON.stringify(cached));
+}
+
+export function loadBenchmarkPrices(): CachedBenchmarks | null {
+  const data = localStorage.getItem(STORAGE_KEYS.BENCHMARK_PRICES);
+  if (!data) return null;
+  return safeJSONParse<CachedBenchmarks | null>(data, null);
+}
+
+export function isBenchmarkStale(cached: CachedBenchmarks | null): boolean {
+  if (!cached) return true;
+  return (Date.now() - cached.fetchedAt) > BENCHMARK_CACHE_MS;
+}
 
 function safeJSONParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;

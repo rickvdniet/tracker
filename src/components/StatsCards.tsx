@@ -1,6 +1,8 @@
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, Coins } from 'lucide-react';
+import { useMemo } from 'react';
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, Target, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { formatCurrency, formatPercent } from '../utils/calculations';
+import { calculateBenchmarkComparison, calculatePerformanceVsBenchmark } from '../utils/benchmarks';
 
 interface StatCardProps {
   title: string;
@@ -38,10 +40,29 @@ function StatCard({ title, value, subtitle, icon, trend }: StatCardProps) {
 }
 
 export function StatsCards() {
-  const { stats } = usePortfolio();
+  const {
+    stats,
+    transactions,
+    snapshots,
+    exchangeRates,
+    benchmarkPrices,
+    benchmarkPricesLoading,
+  } = usePortfolio();
+
+  const alphaPerf = useMemo(() => {
+    if (!benchmarkPrices) return null;
+    const data = calculateBenchmarkComparison(transactions, snapshots, benchmarkPrices, exchangeRates, 'ALL');
+    return calculatePerformanceVsBenchmark(data);
+  }, [transactions, snapshots, benchmarkPrices, exchangeRates]);
 
   const profitTrend = stats.totalProfitLoss >= 0 ? 'up' : 'down';
   const ProfitIcon = stats.totalProfitLoss >= 0 ? TrendingUp : TrendingDown;
+
+  // Alpha card values
+  const alphaLoading = !alphaPerf && benchmarkPricesLoading;
+  const alpha = alphaPerf?.alpha ?? 0;
+  const alphaTrend = alpha >= 0 ? 'up' : 'down';
+  const AlphaIcon = alpha >= 0 ? TrendingUp : TrendingDown;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -62,11 +83,29 @@ export function StatsCards() {
         icon={<ProfitIcon className={`w-5 h-5 ${profitTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`} />}
         trend={profitTrend}
       />
-      <StatCard
-        title="Dividends Received"
-        value={formatCurrency(stats.totalDividends)}
-        icon={<Coins className="w-5 h-5 text-amber-400" />}
-      />
+      {alphaLoading ? (
+        <StatCard
+          title="Alpha vs S&P 500"
+          value="…"
+          subtitle="Fetching benchmark"
+          icon={<Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
+        />
+      ) : alphaPerf && alphaPerf.benchmarkInvested > 0 ? (
+        <StatCard
+          title="Alpha vs S&P 500"
+          value={`${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}pp`}
+          subtitle={`You ${formatPercent(alphaPerf.portfolioReturn)} · S&P ${formatPercent(alphaPerf.sp500Return)}`}
+          icon={<AlphaIcon className={`w-5 h-5 ${alphaTrend === 'up' ? 'text-emerald-400' : 'text-red-400'}`} />}
+          trend={alphaTrend}
+        />
+      ) : (
+        <StatCard
+          title="Alpha vs S&P 500"
+          value="—"
+          subtitle="Benchmark unavailable"
+          icon={<Target className="w-5 h-5 text-slate-400" />}
+        />
+      )}
     </div>
   );
 }
