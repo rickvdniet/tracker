@@ -8,6 +8,7 @@ import {
   Ban,
   Zap,
   Compass,
+  HelpCircle,
 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { formatCurrency } from '../utils/calculations';
@@ -15,16 +16,9 @@ import {
   analyzePortfolio,
   SPECULATIVE_RULES,
   MONTHLY_BUDGET,
+  CATEGORY_LABELS,
   type AllocationStatus,
 } from '../utils/advisor';
-
-const CATEGORY_LABELS: Record<AllocationStatus['asset']['category'], { label: string; color: string; icon: string }> = {
-  core: { label: 'CORE', color: 'bg-emerald-500', icon: '🛡️' },
-  turbo: { label: 'TURBO', color: 'bg-orange-500', icon: '⚡' },
-  frontier: { label: 'FRONTIER', color: 'bg-purple-500', icon: '🔭' },
-  proxy: { label: 'PROXY', color: 'bg-blue-500', icon: '📊' },
-  speculative: { label: 'SPECULATIVE', color: 'bg-red-500', icon: '🎲' },
-};
 
 function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
   const { asset, currentPercent, status } = alloc;
@@ -43,8 +37,8 @@ function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className={`text-xs px-2 py-0.5 rounded ${cat.color}/20 border ${cat.color.replace('bg', 'border')} text-white font-semibold`}>
-              {cat.icon} {cat.label}
+            <span className={`text-xs px-2 py-0.5 rounded border text-white font-semibold ${cat.badgeClass}`}>
+              {cat.icon} {cat.short}
             </span>
             <span className="text-sm font-medium text-white">{asset.name}</span>
           </div>
@@ -62,14 +56,11 @@ function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
         </div>
       </div>
 
-      {/* Bar with target range indicator */}
       <div className="relative h-3 bg-slate-700 rounded-full overflow-hidden">
-        {/* Target range zone */}
         <div
           className="absolute h-full bg-slate-600/60"
           style={{ left: `${targetMinPct}%`, width: `${targetMaxPct - targetMinPct}%` }}
         />
-        {/* Current position bar */}
         <div className={`absolute h-full ${barColor} rounded-full transition-all`} style={{ width: `${currentBarPct}%` }} />
       </div>
 
@@ -84,16 +75,28 @@ function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
           {alloc.deviation >= 0 ? '+' : ''}{alloc.deviation.toFixed(1)}pp vs midpoint
         </span>
       </div>
+
+      {/* Contributing holdings */}
+      {alloc.holdings.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-700 space-y-1">
+          {alloc.holdings.map((h) => (
+            <div key={h.isin} className="flex items-center justify-between text-xs">
+              <span className="text-slate-400 truncate mr-2">{h.product}</span>
+              <span className="text-slate-500 shrink-0">{formatCurrency(h.currentValue)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 export function AdvisorDashboard() {
-  const { holdings, historicalPrices } = usePortfolio();
+  const { holdings, historicalPrices, holdingMetadata } = usePortfolio();
 
   const analysis = useMemo(
-    () => analyzePortfolio(holdings, historicalPrices),
-    [holdings, historicalPrices]
+    () => analyzePortfolio(holdings, historicalPrices, holdingMetadata),
+    [holdings, historicalPrices, holdingMetadata]
   );
 
   if (holdings.length === 0) {
@@ -128,6 +131,30 @@ export function AdvisorDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Unassigned holdings warning */}
+      {analysis.unassignedHoldings.length > 0 && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <HelpCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-400 mb-1">
+                {analysis.unassignedHoldings.length} holding{analysis.unassignedHoldings.length > 1 ? 's' : ''} without a category
+              </p>
+              <p className="text-xs text-slate-300 mb-2">
+                Click a holding in the Portfolio tab and assign it a framework category (Core / Turbo / Frontier / Proxy / Speculative). Unassigned holdings don't count toward any bucket.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {analysis.unassignedHoldings.map((h) => (
+                  <span key={h.isin} className="text-xs px-2 py-1 bg-slate-800 border border-slate-700 rounded">
+                    {h.product}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Primary Recommendation */}
       <div className={`rounded-xl border p-5 ${
@@ -177,7 +204,6 @@ export function AdvisorDashboard() {
 
       {/* Iron Laws status */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Harvest */}
         <div className={`rounded-xl border p-4 ${
           analysis.harvestAlerts.length > 0
             ? 'bg-red-500/10 border-red-500/40'
@@ -205,7 +231,6 @@ export function AdvisorDashboard() {
           )}
         </div>
 
-        {/* FOMO Blockade */}
         <div className={`rounded-xl border p-4 ${
           analysis.fomoAlerts.length > 0
             ? 'bg-amber-500/10 border-amber-500/40'
@@ -232,7 +257,6 @@ export function AdvisorDashboard() {
           )}
         </div>
 
-        {/* Dip Priority */}
         <div className={`rounded-xl border p-4 ${
           analysis.dipAlerts.length > 0
             ? 'bg-emerald-500/10 border-emerald-500/40'
@@ -288,6 +312,23 @@ export function AdvisorDashboard() {
             <p className="text-xs text-slate-500">max {SPECULATIVE_RULES.maxTotal}% total · {SPECULATIVE_RULES.maxPerPosition}% per position</p>
           </div>
         </div>
+        {analysis.speculativeHoldings.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-700 space-y-1">
+            {analysis.speculativeHoldings.map((h) => {
+              const pct = analysis.totalValue > 0 ? (h.currentValue / analysis.totalValue) * 100 : 0;
+              const overSingle = pct > SPECULATIVE_RULES.maxPerPosition;
+              return (
+                <div key={h.isin} className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 truncate mr-2">{h.product}</span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className={overSingle ? 'text-red-400' : 'text-slate-500'}>{pct.toFixed(1)}%</span>
+                    <span className="text-slate-500">{formatCurrency(h.currentValue)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {speculativeOverLimit && (
           <p className="text-xs text-red-400 mt-2">
             ⚠️ Speculative allocation over {SPECULATIVE_RULES.maxTotal}% limit — reduce exposure.
@@ -295,7 +336,7 @@ export function AdvisorDashboard() {
         )}
       </div>
 
-      {/* Framework reference */}
+      {/* Execution protocol */}
       <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
         <h4 className="text-sm font-semibold text-white mb-3">Execution Protocol</h4>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
@@ -318,7 +359,6 @@ export function AdvisorDashboard() {
         </div>
       </div>
 
-      {/* Total value footer */}
       <div className="text-xs text-slate-500 text-center">
         Portfolio total: {formatCurrency(analysis.totalValue)} · Analysis based on {holdings.length} holdings
         {' · '}

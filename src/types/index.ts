@@ -31,6 +31,8 @@ export interface Holding {
   annualDividend?: number;
 }
 
+export type FrameworkCategory = 'core' | 'turbo' | 'frontier' | 'proxy' | 'speculative';
+
 export interface HoldingMetadata {
   isin: string;
   tags: string[];
@@ -39,6 +41,7 @@ export interface HoldingMetadata {
   dividendYield?: number;
   expectedDividendPerShare?: number;
   dividendFrequency?: 'monthly' | 'quarterly' | 'semi-annual' | 'annual';
+  frameworkCategory?: FrameworkCategory;
 }
 
 export interface DividendInfo {
