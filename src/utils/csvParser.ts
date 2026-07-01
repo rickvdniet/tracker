@@ -47,15 +47,67 @@ function parseNumber(value: string | undefined): number {
 }
 
 function parseDate(dateStr: string): Date {
-  // DeGiro format: DD-MM-YYYY
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const day = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    const year = parseInt(parts[2], 10);
+  // ISO format: YYYY-MM-DD (used by our own CSV export and modern DeGiro exports)
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(dateStr);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
     return new Date(year, month, day);
   }
+
+  // DeGiro Dutch format: DD-MM-YYYY (or D-M-YYYY)
+  const dmyMatch = /^(\d{1,2})-(\d{1,2})-(\d{4})/.exec(dateStr);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    return new Date(year, month, day);
+  }
+
   return new Date(dateStr);
+}
+
+/**
+ * Recover a date that was corrupted by the old parseDate bug.
+ * The bug: given ISO date "YYYY-MM-DD", parseDate did new Date(year=DD, month=MM-1, day=YYYY),
+ * which produced dates in the 1900s due to two-digit-year handling + day overflow.
+ *
+ * Given the corrupted output, iterate over plausible (year, month, day) triples
+ * to find one that reproduces the corrupted date. Returns the reconstruction
+ * closest to today's year.
+ */
+export function recoverCorruptedDate(corrupted: Date): Date | null {
+  const currentYear = new Date().getFullYear();
+  let best: { date: Date; distance: number } | null = null;
+
+  for (let dayField = 1; dayField <= 31; dayField++) {
+    for (let monthField = 0; monthField < 12; monthField++) {
+      // Original CSV had: year=YYYY, month=monthField+1, day=dayField
+      // Buggy Date call was: new Date(dayField, monthField, YYYY)
+      // JS treats dayField (1-31) as 1901-1931, then adds YYYY-1 days
+      const baseYear = 1900 + dayField;
+      const base = new Date(baseYear, monthField, 1);
+      const diffMs = corrupted.getTime() - base.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      const yyyy = diffDays + 1;
+
+      if (yyyy < 1970 || yyyy > 2100) continue;
+
+      // Verify: reconstructing via the buggy formula should match
+      const check = new Date(dayField, monthField, yyyy);
+      if (Math.abs(check.getTime() - corrupted.getTime()) > 60 * 60 * 1000) continue;
+
+      const recovered = new Date(yyyy, monthField, dayField);
+      const distance = Math.abs(recovered.getFullYear() - currentYear);
+
+      if (!best || distance < best.distance) {
+        best = { date: recovered, distance };
+      }
+    }
+  }
+
+  return best?.date ?? null;
 }
 
 function determineTransactionType(row: DeGiroTransactionRow): Transaction['type'] {
