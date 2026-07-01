@@ -10,7 +10,7 @@ import {
   Legend,
 } from 'recharts';
 import { format } from 'date-fns';
-import { TrendingUp, TrendingDown, Target, Loader2, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import {
   calculateBenchmarkComparison,
@@ -27,6 +27,7 @@ interface ChartPoint {
   sp500Value: number;
   msciWorldValue: number;
   totalInvested: number;
+  benchmarkInvested: number;
 }
 
 interface CustomTooltipProps {
@@ -38,13 +39,14 @@ interface CustomTooltipProps {
 function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0 || !label) return null;
   const data = payload[0].payload;
-  const invested = data.totalInvested;
 
+  // Portfolio is compared against total actual invested;
+  // benchmarks are compared against the amount that could be simulated.
   const rows = [
-    { name: 'Your Portfolio', value: data.portfolioValue, color: '#10b981' },
-    { name: 'S&P 500',        value: data.sp500Value,     color: '#3b82f6' },
-    { name: 'MSCI World',     value: data.msciWorldValue, color: '#a855f7' },
-    { name: 'Invested',       value: data.totalInvested,  color: '#94a3b8' },
+    { name: 'Your Portfolio', value: data.portfolioValue, base: data.totalInvested,     color: '#10b981' },
+    { name: 'S&P 500',        value: data.sp500Value,     base: data.benchmarkInvested, color: '#3b82f6' },
+    { name: 'MSCI World',     value: data.msciWorldValue, base: data.benchmarkInvested, color: '#a855f7' },
+    { name: 'Invested',       value: data.totalInvested,  base: 0,                      color: '#94a3b8' },
   ];
 
   return (
@@ -52,14 +54,14 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
       <p className="text-sm text-slate-400 mb-2">{format(new Date(label), 'd MMM yyyy')}</p>
       <div className="space-y-1">
         {rows.map((r) => {
-          const gain = invested > 0 ? ((r.value - invested) / invested) * 100 : 0;
-          const isInvested = r.name === 'Invested';
+          const gain = r.base > 0 ? ((r.value - r.base) / r.base) * 100 : 0;
+          const showPct = r.name !== 'Invested' && r.base > 0;
           return (
             <div key={r.name} className="flex justify-between gap-4 text-xs">
               <span style={{ color: r.color }}>{r.name}:</span>
               <div className="text-right">
                 <span className="text-white font-medium">{formatCurrency(r.value)}</span>
-                {!isInvested && invested > 0 && (
+                {showPct && (
                   <span className={`ml-2 ${gain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {gain >= 0 ? '+' : ''}{gain.toFixed(1)}%
                   </span>
@@ -121,7 +123,8 @@ export function PerformanceBenchmark() {
           portfolioValue: 0, portfolioReturn: 0,
           sp500Value: 0, sp500Return: 0,
           msciWorldValue: 0, msciWorldReturn: 0,
-          totalInvested: 0, alpha: 0, outperforming: false,
+          totalInvested: 0, benchmarkInvested: 0,
+          hasCoverageGap: false, alpha: 0, outperforming: false,
         },
       };
     }
@@ -192,6 +195,26 @@ export function PerformanceBenchmark() {
 
   return (
     <div className="space-y-6">
+      {/* Coverage gap warning */}
+      {performance.hasCoverageGap && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-400 mb-1">
+                Benchmark comparison incomplete
+              </p>
+              <p className="text-xs text-slate-300">
+                Only <span className="text-white font-medium">{formatCurrency(performance.benchmarkInvested)}</span> of your{' '}
+                <span className="text-white font-medium">{formatCurrency(performance.totalInvested)}</span> in buys could be
+                simulated against the benchmarks (some transactions have dates outside the benchmark's history).{' '}
+                Try running <span className="text-white font-medium">Fix Dates</span> in Settings to recover corrupted dates.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header with time range */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
@@ -199,6 +222,9 @@ export function PerformanceBenchmark() {
             Compared over: <span className="text-white font-medium">{timeRange === 'ALL' ? 'entire history' : timeRange}</span>
             {' · '}
             {formatCurrency(performance.totalInvested)} invested
+            {performance.hasCoverageGap && (
+              <span className="text-amber-400"> ({formatCurrency(performance.benchmarkInvested)} comparable)</span>
+            )}
           </h3>
         </div>
         <div className="flex gap-1 bg-slate-700/50 rounded-lg p-1">

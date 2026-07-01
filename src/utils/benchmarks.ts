@@ -99,10 +99,13 @@ export function filterDateRangeStart(range: TimeRange): Date | null {
 
 export interface BenchmarkChartPoint {
   date: string;
-  portfolioValue: number;    // EUR
+  portfolioValue: number;    // EUR — actual portfolio value from snapshot
   sp500Value: number;        // EUR — same money into S&P 500 instead
   msciWorldValue: number;    // EUR — same money into MSCI World instead
-  totalInvested: number;     // EUR — cash contributed so far
+  totalInvested: number;     // EUR — actual cash contributed (from snapshot)
+  // Amount of cash that could actually be simulated against the benchmark
+  // (may be less than totalInvested if some transactions are outside benchmark date coverage)
+  benchmarkInvested: number;
 }
 
 /**
@@ -146,19 +149,24 @@ export function calculateBenchmarkComparison(
       sp500Value: sp500Sim.currentValue,
       msciWorldValue: msciSim.currentValue,
       totalInvested: snapshot.totalInvested,
+      // Simulation invested amounts should be equal for both benchmarks
+      // (both cover recent history) — use S&P's as canonical
+      benchmarkInvested: sp500Sim.totalInvested,
     };
   });
 }
 
 export interface BenchmarkPerformance {
-  portfolioValue: number;       // EUR at end
-  portfolioReturn: number;      // % return on invested capital
-  sp500Value: number;           // EUR simulated
-  sp500Return: number;
-  msciWorldValue: number;       // EUR simulated
+  portfolioValue: number;
+  portfolioReturn: number;      // % return on actual invested
+  sp500Value: number;
+  sp500Return: number;          // % return on same benchmarkInvested
+  msciWorldValue: number;
   msciWorldReturn: number;
-  totalInvested: number;        // EUR contributed in period
-  alpha: number;                // portfolio return - sp500 return, percentage points
+  totalInvested: number;        // Actual EUR contributed
+  benchmarkInvested: number;    // EUR that could be simulated
+  hasCoverageGap: boolean;      // true if some tx are outside benchmark coverage
+  alpha: number;                // portfolioReturn - sp500Return, percentage points
   outperforming: boolean;
 }
 
@@ -170,18 +178,23 @@ export function calculatePerformanceVsBenchmark(
       portfolioValue: 0, portfolioReturn: 0,
       sp500Value: 0, sp500Return: 0,
       msciWorldValue: 0, msciWorldReturn: 0,
-      totalInvested: 0, alpha: 0, outperforming: false,
+      totalInvested: 0, benchmarkInvested: 0,
+      hasCoverageGap: false, alpha: 0, outperforming: false,
     };
   }
 
   const last = chartData[chartData.length - 1];
   const invested = last.totalInvested;
+  const bInvested = last.benchmarkInvested;
 
-  // Return = (final value - invested) / invested. Same denominator for all three.
-  const portfolioReturn  = invested > 0 ? ((last.portfolioValue  - invested) / invested) * 100 : 0;
-  const sp500Return      = invested > 0 ? ((last.sp500Value      - invested) / invested) * 100 : 0;
-  const msciWorldReturn  = invested > 0 ? ((last.msciWorldValue  - invested) / invested) * 100 : 0;
-  const alpha = portfolioReturn - sp500Return;
+  // Portfolio return uses actual invested; benchmark returns use their own simulated invested
+  // so all three are fair "% return on capital deployed" numbers.
+  const portfolioReturn = invested  > 0 ? ((last.portfolioValue - invested)  / invested)  * 100 : 0;
+  const sp500Return     = bInvested > 0 ? ((last.sp500Value     - bInvested) / bInvested) * 100 : 0;
+  const msciWorldReturn = bInvested > 0 ? ((last.msciWorldValue - bInvested) / bInvested) * 100 : 0;
+
+  // Coverage gap: benchmark simulation missed >1% of the actual invested amount
+  const hasCoverageGap = invested > 0 && (invested - bInvested) / invested > 0.01;
 
   return {
     portfolioValue: last.portfolioValue,
@@ -191,7 +204,9 @@ export function calculatePerformanceVsBenchmark(
     msciWorldValue: last.msciWorldValue,
     msciWorldReturn,
     totalInvested: invested,
-    alpha,
+    benchmarkInvested: bInvested,
+    hasCoverageGap,
+    alpha: portfolioReturn - sp500Return,
     outperforming: portfolioReturn > sp500Return,
   };
 }
