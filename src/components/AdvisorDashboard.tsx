@@ -201,7 +201,7 @@ export function AdvisorDashboard() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-slate-500">All positions ≤10%. No harvest required.</p>
+            <p className="text-xs text-slate-500">All individual stocks ≤10%. ETFs are exempt.</p>
           )}
         </div>
 

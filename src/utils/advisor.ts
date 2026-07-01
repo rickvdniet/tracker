@@ -173,8 +173,16 @@ export function analyzePortfolio(
   const speculativeValue = speculativeHoldings.reduce((sum, h) => sum + h.currentValue, 0);
   const speculativePercent = totalValue > 0 ? (speculativeValue / totalValue) * 100 : 0;
 
-  // Harvest alerts: any single position >10%
+  // Harvest alerts: any INDIVIDUAL STOCK >10%.
+  // Per framework: applies only to individual stocks (INVE-B, BESI, speculative),
+  // NOT to diversified ETFs (VWCE, Nasdaq, Small Cap) which are designed to hold >10%.
+  const etfIsins = new Set(
+    FRAMEWORK
+      .filter((a) => a.category === 'core' || a.category === 'turbo' || a.category === 'frontier')
+      .flatMap((a) => a.isins)
+  );
   const harvestAlerts: HarvestAlert[] = holdings
+    .filter((h) => !etfIsins.has(h.isin)) // exclude diversified ETFs
     .map((h) => {
       const pct = totalValue > 0 ? (h.currentValue / totalValue) * 100 : 0;
       return { holding: h, currentPercent: pct };
