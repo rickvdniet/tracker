@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Upload, Download, Trash2, FileText, AlertCircle, CheckCircle, Wrench, Loader2 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { parseDeGiroTransactions, exportTransactionsToCSV } from '../utils/csvParser';
-import { exportAllData, importAllData, migrateTransactionCurrencies } from '../utils/storage';
+import { exportAllData, importAllData, migrateTransactionCurrencies, migrateBrokenDates, countBrokenDates } from '../utils/storage';
 import { fetchExchangeRate, fetchPrices, getPriceCurrency } from '../utils/priceApi';
 
 export function ImportExport() {
@@ -233,6 +233,36 @@ export function ImportExport() {
           >
             <Wrench className="w-4 h-4" />
             Fix Currencies
+          </button>
+        </div>
+
+        <div>
+          <p className="text-sm text-slate-400 mb-2">
+            Fix corrupted transaction dates
+            {countBrokenDates() > 0 && (
+              <span className="text-red-400 ml-1">({countBrokenDates()} affected)</span>
+            )}
+          </p>
+          <button
+            onClick={() => {
+              const { fixed, unfixable } = migrateBrokenDates();
+              if (fixed > 0) {
+                setStatus({
+                  type: 'success',
+                  message: `Recovered ${fixed} date(s)${unfixable > 0 ? ` (${unfixable} could not be fixed)` : ''}. Refresh…`,
+                });
+                setTimeout(() => window.location.reload(), 1500);
+              } else if (unfixable > 0) {
+                setStatus({ type: 'error', message: `${unfixable} broken date(s) could not be recovered. Consider re-importing your DeGiro CSV.` });
+              } else {
+                setStatus({ type: 'success', message: 'All dates are valid — no fix needed' });
+              }
+            }}
+            disabled={transactions.length === 0}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Wrench className="w-4 h-4" />
+            Fix Dates
           </button>
         </div>
 

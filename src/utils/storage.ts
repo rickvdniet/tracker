@@ -1,5 +1,6 @@
 import type { Transaction, PortfolioSnapshot, HoldingMetadata } from '../types';
 import { getPriceCurrency } from './priceApi';
+import { recoverCorruptedDate } from './csvParser';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'degiro_transactions',
@@ -184,6 +185,42 @@ export function importAllData(jsonString: string): boolean {
     console.error('Failed to import data:', error);
     return false;
   }
+}
+
+// Detect and fix transactions with corrupted dates (result of the old
+// parseDate bug that misparsed YYYY-MM-DD as DD-MM-YYYY, producing dates
+// in the 1900s). Returns the number of transactions that were fixed.
+export function migrateBrokenDates(): { fixed: number; unfixable: number } {
+  const transactions = loadTransactions();
+  let fixed = 0;
+  let unfixable = 0;
+
+  const migrated = transactions.map((t) => {
+    const year = t.date.getFullYear();
+    // Any date before 2000 or after 2100 is suspect
+    if (year >= 2000 && year <= 2100) return t;
+
+    const recovered = recoverCorruptedDate(t.date);
+    if (recovered) {
+      fixed++;
+      return { ...t, date: recovered };
+    }
+    unfixable++;
+    return t;
+  });
+
+  if (fixed > 0) {
+    saveTransactions(migrated);
+  }
+  return { fixed, unfixable };
+}
+
+// Count transactions with dates outside a reasonable range (2000-2100)
+export function countBrokenDates(): number {
+  return loadTransactions().filter((t) => {
+    const y = t.date.getFullYear();
+    return y < 2000 || y > 2100;
+  }).length;
 }
 
 // Fix currencies in existing transactions using ISIN-to-ticker mapping

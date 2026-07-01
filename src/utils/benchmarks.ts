@@ -14,7 +14,7 @@ export interface BenchmarkPrices {
 }
 
 // Fetch historical weekly prices for both benchmarks in parallel
-export async function fetchBenchmarkPrices(rangeYears: number = 5): Promise<BenchmarkPrices> {
+export async function fetchBenchmarkPrices(rangeYears: number = 10): Promise<BenchmarkPrices> {
   const [sp500, msciWorld] = await Promise.all([
     fetchHistoricalPrices(BENCHMARK_TICKERS.sp500, rangeYears),
     fetchHistoricalPrices(BENCHMARK_TICKERS.msciWorld, rangeYears),
@@ -33,25 +33,45 @@ function priceOnOrBefore(
   return eligible[eligible.length - 1].price;
 }
 
-// Build benchmark comparison chart data using real historical prices
+// Build benchmark comparison chart data using real historical prices.
+// Only snapshots that fall within the benchmark data range are included —
+// this prevents flat/wrong-looking charts when snapshots span outside
+// benchmark coverage or have corrupted dates.
 export function calculateBenchmarkComparison(
   snapshots: PortfolioSnapshot[],
   benchmarks: BenchmarkPrices
 ): BenchmarkData[] {
-  if (snapshots.length === 0) return [];
+  if (snapshots.length === 0 || benchmarks.sp500.length === 0) return [];
 
-  // Find first date where all data is available
-  const firstSnapshotDate = format(snapshots[0].date, 'yyyy-MM-dd');
-  const sp500Base = priceOnOrBefore(benchmarks.sp500, firstSnapshotDate);
-  const msciBase = priceOnOrBefore(benchmarks.msciWorld, firstSnapshotDate);
+  // Determine the valid overlap window between snapshots and benchmark data
+  const benchmarkStart = benchmarks.sp500[0].date; // earliest benchmark date
+  const now = new Date();
+  const nowKey = format(now, 'yyyy-MM-dd');
 
-  return snapshots.map((snapshot) => {
+  // Filter snapshots to only those within benchmark coverage and reasonable date range
+  const validSnapshots = snapshots.filter((s) => {
+    const dateStr = format(s.date, 'yyyy-MM-dd');
+    const year = s.date.getFullYear();
+    return year >= 2000 && year <= 2100 && dateStr >= benchmarkStart && dateStr <= nowKey;
+  });
+
+  if (validSnapshots.length === 0) return [];
+
+  // Base the comparison on the first VALID snapshot
+  const firstSnapshotDate = format(validSnapshots[0].date, 'yyyy-MM-dd');
+  const sp500Base = priceOnOrBefore(benchmarks.sp500, firstSnapshotDate)
+    ?? benchmarks.sp500[0]?.price ?? null;
+  const msciBase = priceOnOrBefore(benchmarks.msciWorld, firstSnapshotDate)
+    ?? benchmarks.msciWorld[0]?.price ?? null;
+
+  // Rebase portfolio too — subtract the first valid snapshot's profitLossPercent
+  // so the chart starts at 100 for all three lines
+  const portfolioBaseline = validSnapshots[0].profitLossPercent;
+
+  return validSnapshots.map((snapshot) => {
     const dateStr = format(snapshot.date, 'yyyy-MM-dd');
+    const portfolioValue = 100 + (snapshot.profitLossPercent - portfolioBaseline);
 
-    // Portfolio value: use profitLossPercent so deposits don't look like growth
-    const portfolioValue = 100 + snapshot.profitLossPercent;
-
-    // Benchmark values normalized to 100 at first date
     let sp500 = 100;
     let msciWorld = 100;
 
@@ -79,14 +99,14 @@ export function calculatePerformanceVsBenchmark(
   alpha: number;
   outperforming: boolean;
 } {
-  if (snapshots.length < 2) {
+  const benchmarkData = calculateBenchmarkComparison(snapshots, benchmarks);
+  if (benchmarkData.length < 2) {
     return { portfolioReturn: 0, sp500Return: 0, msciWorldReturn: 0, alpha: 0, outperforming: false };
   }
 
-  const benchmarkData = calculateBenchmarkComparison(snapshots, benchmarks);
   const last = benchmarkData[benchmarkData.length - 1];
-
-  const portfolioReturn = snapshots[snapshots.length - 1].profitLossPercent;
+  // All three are already normalized to 100 at start in calculateBenchmarkComparison
+  const portfolioReturn = last.portfolioValue - 100;
   const sp500Return = last.sp500 - 100;
   const msciWorldReturn = last.msciWorld - 100;
   const alpha = portfolioReturn - sp500Return;
