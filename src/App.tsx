@@ -9,20 +9,20 @@ import {
   ImportExport,
   TransactionsList,
   AddTransactionForm,
-  DividendDashboard,
+  AdvisorDashboard,
   PerformanceBenchmark,
   AutoPriceUpdater,
 } from './components';
-import { LayoutDashboard, Coins, TrendingUp, Settings, Check } from 'lucide-react';
+import { LayoutDashboard, Compass, TrendingUp, Settings, Check } from 'lucide-react';
 import { getCustomProxyUrl, setCustomProxyUrl } from './utils/priceApi';
 import './index.css';
 
-type Tab = 'portfolio' | 'dividends' | 'benchmark' | 'settings';
+type Tab = 'portfolio' | 'advisor' | 'benchmark' | 'settings';
 
 function Navigation({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (tab: Tab) => void }) {
   const tabs = [
     { id: 'portfolio' as Tab, label: 'Portfolio', icon: LayoutDashboard },
-    { id: 'dividends' as Tab, label: 'Dividends', icon: Coins },
+    { id: 'advisor' as Tab, label: 'Advisor', icon: Compass },
     { id: 'benchmark' as Tab, label: 'Benchmark', icon: TrendingUp },
     { id: 'settings' as Tab, label: 'Settings', icon: Settings },
   ];
@@ -83,14 +83,14 @@ function PortfolioView() {
   );
 }
 
-function DividendsView() {
+function AdvisorView() {
   return (
     <>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white">Dividend Tracking</h2>
-        <p className="text-slate-400 mt-1">Track your dividend income and projected yields</p>
+        <h2 className="text-2xl font-bold text-white">Portfolio Advisor</h2>
+        <p className="text-slate-400 mt-1">Rules-based investment guidance from the Hard-Growth Framework</p>
       </div>
-      <DividendDashboard />
+      <AdvisorDashboard />
     </>
   );
 }
@@ -208,8 +208,8 @@ function SettingsView() {
                 <li>Import transactions from DeGiro CSV exports</li>
                 <li>Manual transaction entry</li>
                 <li>Real-time portfolio value tracking</li>
-                <li>Dividend income tracking and projections</li>
-                <li>Performance comparison against benchmarks</li>
+                <li>Rules-based advisor (Hard-Growth Framework)</li>
+                <li>Performance comparison against real benchmarks</li>
                 <li>Notes and tags for holdings</li>
                 <li>Auto price updates via Yahoo Finance</li>
               </ul>
@@ -231,7 +231,7 @@ function Dashboard() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'portfolio' && <PortfolioView />}
-        {activeTab === 'dividends' && <DividendsView />}
+        {activeTab === 'advisor' && <AdvisorView />}
         {activeTab === 'benchmark' && <BenchmarkView />}
         {activeTab === 'settings' && <SettingsView />}
       </main>
