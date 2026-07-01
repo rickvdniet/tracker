@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { X, Tag, FileText, Save, Plus, TicketCheck } from 'lucide-react';
-import type { Holding, HoldingMetadata } from '../types';
+import { X, Tag, FileText, Save, Plus, TicketCheck, Compass } from 'lucide-react';
+import type { Holding, HoldingMetadata, FrameworkCategory } from '../types';
 import { formatCurrency, formatPercent } from '../utils/calculations';
 import { isinToTicker, registerIsinMapping } from '../utils/priceApi';
+import { CATEGORY_LABELS, getHoldingCategory } from '../utils/advisor';
 
 interface HoldingDetailsProps {
   holding: Holding;
@@ -49,6 +50,11 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
   const [dividendYield, setDividendYield] = useState(metadata?.dividendYield?.toString() || '');
   const [newTag, setNewTag] = useState('');
   const [ticker, setTicker] = useState(isinToTicker(holding.isin) ?? '');
+  // Framework category — if user hasn't set one, show auto-detected default
+  const autoDetected = getHoldingCategory(holding.isin, new Map());
+  const [frameworkCategory, setFrameworkCategory] = useState<FrameworkCategory | ''>(
+    metadata?.frameworkCategory ?? ''
+  );
 
   const handleAddTag = (tag: string) => {
     const normalizedTag = tag.trim();
@@ -72,6 +78,7 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
       notes,
       sector,
       dividendYield: dividendYield ? parseFloat(dividendYield) : undefined,
+      frameworkCategory: frameworkCategory || undefined,
     });
     onClose();
   };
@@ -130,6 +137,33 @@ export function HoldingDetails({ holding, onClose, onSave, metadata }: HoldingDe
             />
             <p className="text-xs text-slate-500 mt-1">
               Used for automatic price fetching. Find it on finance.yahoo.com.
+            </p>
+          </div>
+
+          {/* Framework Category */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+              <Compass className="w-4 h-4" />
+              Framework Category
+            </label>
+            <select
+              value={frameworkCategory}
+              onChange={(e) => setFrameworkCategory(e.target.value as FrameworkCategory | '')}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-emerald-500 focus:border-emerald-500"
+            >
+              <option value="">
+                {autoDetected
+                  ? `Auto: ${CATEGORY_LABELS[autoDetected].label}`
+                  : 'None (unassigned)'}
+              </option>
+              {(Object.keys(CATEGORY_LABELS) as FrameworkCategory[]).map((cat) => (
+                <option key={cat} value={cat}>
+                  {CATEGORY_LABELS[cat].icon} {CATEGORY_LABELS[cat].label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Used by the Advisor to bucket holdings into Core / Turbo / Frontier / Proxy / Speculative.
             </p>
           </div>
 

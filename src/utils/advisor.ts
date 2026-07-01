@@ -1,55 +1,56 @@
-import type { Holding } from '../types';
+import type { Holding, HoldingMetadata, FrameworkCategory } from '../types';
 
 // Hard-Growth Framework configuration
-// Each asset has a target allocation range and identifying ISIN(s)
+// Each framework asset represents one target bucket (Core, Turbo, etc.).
+// Holdings are assigned to a bucket either via user metadata (frameworkCategory)
+// or by falling back to the default ISIN mapping.
 export interface FrameworkAsset {
   key: string;
   name: string;
   ticker: string;
-  isins: string[]; // multiple ISINs allowed (e.g. new/old ISIN after split)
-  category: 'core' | 'turbo' | 'frontier' | 'proxy' | 'speculative';
+  defaultIsins: string[]; // used as fallback when user hasn't set frameworkCategory
+  category: FrameworkCategory;
   targetMin: number; // percent
   targetMax: number; // percent
   description: string;
 }
 
-// The framework — hardcoded per user's strategy
 export const FRAMEWORK: FrameworkAsset[] = [
   {
-    key: 'vwce',
+    key: 'core',
     name: 'VWCE (Vanguard All-World)',
     ticker: 'VWCE.DE',
-    isins: ['IE00BK5BQT80'],
+    defaultIsins: ['IE00BK5BQT80'],
     category: 'core',
     targetMin: 55,
     targetMax: 60,
     description: 'THE CORE: Global equity floor. Protection against regional implosions.',
   },
   {
-    key: 'nasdaq',
+    key: 'turbo',
     name: 'Nasdaq-100 (SXRV / Xtrackers)',
     ticker: 'SXRV.DE',
-    isins: ['IE00BMFKG444', 'IE00BMW42181'], // Xtrackers Nasdaq 100 variants
+    defaultIsins: ['IE00BMFKG444', 'IE00BMW42181'],
     category: 'turbo',
     targetMin: 20,
     targetMax: 25,
     description: 'THE TURBO: Growth accelerator. Tech outperformance, higher volatility accepted.',
   },
   {
-    key: 'smallcap',
+    key: 'frontier',
     name: 'WSML / STST (Small Cap Block)',
     ticker: 'WSML.L',
-    isins: ['IE00BF4RFH31', 'IE00BCBJG560'], // iShares MSCI World Small Cap variants
+    defaultIsins: ['IE00BF4RFH31', 'IE00BCBJG560'],
     category: 'frontier',
     targetMin: 10,
     targetMax: 15,
     description: 'THE FRONTIER: Size premium harvesting. Treat both tickers as one block.',
   },
   {
-    key: 'inveb',
+    key: 'proxy',
     name: 'INVE-B (Investor AB)',
     ticker: 'INVE-B.ST',
-    isins: ['SE0015811955', 'SE0015811963'],
+    defaultIsins: ['SE0015811955', 'SE0015811963'],
     category: 'proxy',
     targetMin: 5,
     targetMax: 7.5,
@@ -57,38 +58,59 @@ export const FRAMEWORK: FrameworkAsset[] = [
   },
 ];
 
-// Speculative allocation rules (BESI etc.)
 export const SPECULATIVE_RULES = {
   maxPerPosition: 5,
   maxTotal: 10,
-  // Speculative ISINs (single-stock high-conviction picks like BESI)
-  knownIsins: ['NL0012866412'], // BE Semiconductor Industries
+  knownIsins: ['NL0012866412'], // BESI etc. — defaults into speculative bucket
 };
 
-// Iron Laws thresholds
 export const IRON_LAWS = {
-  harvestThreshold: 10, // Sell if any single position >10%
-  harvestTargetAfter: 5, // Sell down to 5%
-  fomoBlockadeMonthlyReturn: 10, // No buy if >10% up in 30 days
-  dipPriorityDrop: 5, // Full month buy if >5% drop in core assets
+  harvestThreshold: 10,
+  harvestTargetAfter: 5,
+  fomoBlockadeMonthlyReturn: 10,
+  dipPriorityDrop: 5,
 };
 
-export const MONTHLY_BUDGET = 1000; // €1000/month
+export const MONTHLY_BUDGET = 1000;
+
+/**
+ * Determine which framework category a holding belongs to.
+ * Priority:
+ *   1. User assignment via HoldingMetadata.frameworkCategory
+ *   2. Framework asset default ISIN match
+ *   3. Speculative default ISINs
+ *   4. null (unassigned — treated as speculative)
+ */
+export function getHoldingCategory(
+  isin: string,
+  metadata: Map<string, HoldingMetadata>
+): FrameworkCategory | null {
+  const userCategory = metadata.get(isin)?.frameworkCategory;
+  if (userCategory) return userCategory;
+
+  for (const asset of FRAMEWORK) {
+    if (asset.defaultIsins.includes(isin)) return asset.category;
+  }
+
+  if (SPECULATIVE_RULES.knownIsins.includes(isin)) return 'speculative';
+
+  return null;
+}
 
 export interface AllocationStatus {
   asset: FrameworkAsset;
-  currentValue: number;       // EUR
+  currentValue: number;       // EUR — sum of all holdings in this category
   currentPercent: number;
   targetMidpoint: number;
-  deviation: number;          // percent points (current - target midpoint)
+  deviation: number;
   status: 'underweight' | 'in-range' | 'overweight';
-  holding?: Holding;
+  holdings: Holding[];         // all holdings contributing to this bucket
 }
 
 export interface HarvestAlert {
   holding: Holding;
   currentPercent: number;
-  amountToSell: number; // EUR to sell back to 5%
+  amountToSell: number;
 }
 
 export interface FomoAlert {
@@ -106,8 +128,10 @@ export interface DipAlert {
 export interface AdvisorAnalysis {
   totalValue: number;
   allocations: AllocationStatus[];
+  speculativeHoldings: Holding[];
   speculativeValue: number;
   speculativePercent: number;
+  unassignedHoldings: Holding[]; // holdings without any category (need attention)
   harvestAlerts: HarvestAlert[];
   fomoAlerts: FomoAlert[];
   dipAlerts: DipAlert[];
@@ -119,12 +143,6 @@ export interface AdvisorAnalysis {
   };
 }
 
-// Find the holding for a framework asset by matching ISINs
-function findHolding(holdings: Holding[], isins: string[]): Holding | undefined {
-  return holdings.find((h) => isins.includes(h.isin));
-}
-
-// Calculate 30-day return for a holding using historical price data
 function getReturn30d(
   isin: string,
   currentPrice: number,
@@ -133,7 +151,6 @@ function getReturn30d(
   const history = historicalPrices.get(isin);
   if (!history || history.length === 0 || currentPrice === 0) return null;
 
-  // Find price ~30 days ago (weekly data ⇒ 4-5 entries back)
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const targetDateKey = thirtyDaysAgo.toISOString().substring(0, 10);
@@ -148,14 +165,25 @@ function getReturn30d(
 
 export function analyzePortfolio(
   holdings: Holding[],
-  historicalPrices: Map<string, Array<{ date: string; price: number }>>
+  historicalPrices: Map<string, Array<{ date: string; price: number }>>,
+  metadata: Map<string, HoldingMetadata>
 ): AdvisorAnalysis {
   const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
 
-  // Build allocation status for each framework asset
+  // Group holdings by category
+  const holdingsByCategory = new Map<FrameworkCategory | 'unassigned', Holding[]>();
+  for (const holding of holdings) {
+    const category = getHoldingCategory(holding.isin, metadata);
+    const key = category ?? 'unassigned';
+    const existing = holdingsByCategory.get(key) ?? [];
+    existing.push(holding);
+    holdingsByCategory.set(key, existing);
+  }
+
+  // Build allocation status for each framework asset (aggregating all holdings in that category)
   const allocations: AllocationStatus[] = FRAMEWORK.map((asset) => {
-    const holding = findHolding(holdings, asset.isins);
-    const currentValue = holding?.currentValue ?? 0;
+    const bucketHoldings = holdingsByCategory.get(asset.category) ?? [];
+    const currentValue = bucketHoldings.reduce((sum, h) => sum + h.currentValue, 0);
     const currentPercent = totalValue > 0 ? (currentValue / totalValue) * 100 : 0;
     const targetMidpoint = (asset.targetMin + asset.targetMax) / 2;
     const deviation = currentPercent - targetMidpoint;
@@ -164,25 +192,22 @@ export function analyzePortfolio(
     if (currentPercent < asset.targetMin) status = 'underweight';
     else if (currentPercent > asset.targetMax) status = 'overweight';
 
-    return { asset, currentValue, currentPercent, targetMidpoint, deviation, status, holding };
+    return { asset, currentValue, currentPercent, targetMidpoint, deviation, status, holdings: bucketHoldings };
   });
 
-  // Speculative: any holding not in framework
-  const frameworkIsins = new Set(FRAMEWORK.flatMap((a) => a.isins));
-  const speculativeHoldings = holdings.filter((h) => !frameworkIsins.has(h.isin));
+  // Speculative bucket
+  const speculativeHoldings = holdingsByCategory.get('speculative') ?? [];
   const speculativeValue = speculativeHoldings.reduce((sum, h) => sum + h.currentValue, 0);
   const speculativePercent = totalValue > 0 ? (speculativeValue / totalValue) * 100 : 0;
 
-  // Harvest alerts: any INDIVIDUAL STOCK >10%.
-  // Per framework: applies only to individual stocks (INVE-B, BESI, speculative),
-  // NOT to diversified ETFs (VWCE, Nasdaq, Small Cap) which are designed to hold >10%.
-  const etfIsins = new Set(
-    FRAMEWORK
-      .filter((a) => a.category === 'core' || a.category === 'turbo' || a.category === 'frontier')
-      .flatMap((a) => a.isins)
-  );
+  const unassignedHoldings = holdingsByCategory.get('unassigned') ?? [];
+
+  // Harvest alerts: only apply to non-ETF holdings (individual stocks + speculative)
   const harvestAlerts: HarvestAlert[] = holdings
-    .filter((h) => !etfIsins.has(h.isin)) // exclude diversified ETFs
+    .filter((h) => {
+      const cat = getHoldingCategory(h.isin, metadata);
+      return cat === null || cat === 'proxy' || cat === 'speculative';
+    })
     .map((h) => {
       const pct = totalValue > 0 ? (h.currentValue / totalValue) * 100 : 0;
       return { holding: h, currentPercent: pct };
@@ -194,41 +219,38 @@ export function analyzePortfolio(
       amountToSell: holding.currentValue - (totalValue * IRON_LAWS.harvestTargetAfter / 100),
     }));
 
-  // FOMO alerts: any holding up >10% in 30 days
+  // FOMO and Dip alerts (per bucket, using dominant holding's 30d return)
   const fomoAlerts: FomoAlert[] = [];
-  // Dip alerts: core assets (Nasdaq or Small Cap) down >5% in 30 days
   const dipAlerts: DipAlert[] = [];
 
   for (const alloc of allocations) {
-    if (!alloc.holding) continue;
-    const ret30d = getReturn30d(alloc.holding.isin, alloc.holding.currentPrice, historicalPrices);
+    if (alloc.holdings.length === 0) continue;
+    // Use the largest holding in the bucket as the representative for 30d return
+    const dominant = [...alloc.holdings].sort((a, b) => b.currentValue - a.currentValue)[0];
+    const ret30d = getReturn30d(dominant.isin, dominant.currentPrice, historicalPrices);
     if (ret30d === null) continue;
 
     if (ret30d > IRON_LAWS.fomoBlockadeMonthlyReturn) {
-      fomoAlerts.push({
-        isin: alloc.holding.isin,
-        product: alloc.holding.product,
-        return30d: ret30d,
-      });
+      fomoAlerts.push({ isin: dominant.isin, product: dominant.product, return30d: ret30d });
     }
 
-    // Dip only applies to Nasdaq (turbo) and Small Cap (frontier)
     if (
       (alloc.asset.category === 'turbo' || alloc.asset.category === 'frontier') &&
       ret30d < -IRON_LAWS.dipPriorityDrop
     ) {
-      dipAlerts.push({ asset: alloc.asset, holding: alloc.holding, drop30d: ret30d });
+      dipAlerts.push({ asset: alloc.asset, holding: dominant, drop30d: ret30d });
     }
   }
 
-  // Build recommendation
   const recommendation = buildRecommendation(allocations, harvestAlerts, fomoAlerts, dipAlerts);
 
   return {
     totalValue,
     allocations,
+    speculativeHoldings,
     speculativeValue,
     speculativePercent,
+    unassignedHoldings,
     harvestAlerts,
     fomoAlerts,
     dipAlerts,
@@ -242,7 +264,6 @@ function buildRecommendation(
   fomoAlerts: FomoAlert[],
   dipAlerts: DipAlert[]
 ): AdvisorAnalysis['recommendation'] {
-  // 1. Dip Priority takes precedence: full budget to dipped core asset
   if (dipAlerts.length > 0) {
     const deepest = dipAlerts.reduce((a, b) => (a.drop30d < b.drop30d ? a : b));
     return {
@@ -253,19 +274,16 @@ function buildRecommendation(
     };
   }
 
-  // 2. Otherwise, find the most underweight asset
-  // Sort by deviation ascending (most negative = most underweight)
   const sorted = [...allocations].sort((a, b) => a.deviation - b.deviation);
   const underweight = sorted.find((a) => a.status === 'underweight');
-  const target = underweight ?? sorted[0]; // fallback to most-below-midpoint
+  const target = underweight ?? sorted[0];
 
-  // 3. Check FOMO Blockade on the target asset
-  const fomoBlocked = target.holding && fomoAlerts.some((f) => f.isin === target.holding!.isin);
+  const targetHolding = target.holdings[0];
+  const fomoBlocked = targetHolding && fomoAlerts.some((f) => f.isin === targetHolding.isin);
 
   if (fomoBlocked) {
-    // Find next best asset that isn't fomo-blocked
     const nextTarget = sorted.find(
-      (a) => a !== target && !(a.holding && fomoAlerts.some((f) => f.isin === a.holding!.isin))
+      (a) => a !== target && !(a.holdings[0] && fomoAlerts.some((f) => f.isin === a.holdings[0].isin))
     );
     if (nextTarget) {
       return {
@@ -299,3 +317,18 @@ function buildRecommendation(
     blocked: false,
   };
 }
+
+// Helper for UI: human-readable category labels with full Tailwind class strings
+// (must be literal strings so Tailwind's JIT can detect them)
+export const CATEGORY_LABELS: Record<FrameworkCategory, {
+  label: string;
+  short: string;
+  icon: string;
+  badgeClass: string;
+}> = {
+  core:        { label: 'Core (VWCE)',          short: 'CORE',        icon: '🛡️',  badgeClass: 'bg-emerald-500/20 border-emerald-500' },
+  turbo:       { label: 'Turbo (Nasdaq)',       short: 'TURBO',       icon: '⚡',   badgeClass: 'bg-orange-500/20 border-orange-500' },
+  frontier:    { label: 'Frontier (Small Cap)', short: 'FRONTIER',    icon: '🔭',  badgeClass: 'bg-purple-500/20 border-purple-500' },
+  proxy:       { label: 'Proxy (Investor AB)',  short: 'PROXY',       icon: '📊',  badgeClass: 'bg-blue-500/20 border-blue-500' },
+  speculative: { label: 'Speculative (Alpha)',  short: 'SPECULATIVE', icon: '🎲',  badgeClass: 'bg-red-500/20 border-red-500' },
+};
