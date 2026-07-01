@@ -7,7 +7,7 @@ export { ImportExport } from './ImportExport';
 export { TransactionsList } from './TransactionsList';
 export { PriceUpdater } from './PriceUpdater';
 export { AddTransactionForm } from './AddTransactionForm';
-export { DividendDashboard } from './DividendDashboard';
+export { AdvisorDashboard } from './AdvisorDashboard';
 export { PerformanceBenchmark } from './PerformanceBenchmark';
 export { HoldingDetails } from './HoldingDetails';
 export { AutoPriceUpdater } from './AutoPriceUpdater';
