@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -15,8 +15,6 @@ import { usePortfolio } from '../context/PortfolioContext';
 import {
   calculateBenchmarkComparison,
   calculatePerformanceVsBenchmark,
-  fetchBenchmarkPrices,
-  type BenchmarkPrices,
 } from '../utils/benchmarks';
 import { formatCurrency, formatPercent } from '../utils/calculations';
 import type { TimeRange } from '../types';
@@ -85,35 +83,26 @@ const timeRanges: { value: TimeRange; label: string }[] = [
 ];
 
 export function PerformanceBenchmark() {
-  const { transactions, snapshots, exchangeRates } = usePortfolio();
-  const [benchmarks, setBenchmarks] = useState<BenchmarkPrices | null>(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    transactions,
+    snapshots,
+    exchangeRates,
+    benchmarkPrices: benchmarks,
+    benchmarkPricesLoading: loading,
+    refreshBenchmarks,
+  } = usePortfolio();
   const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
 
   const loadBenchmarks = async () => {
-    setLoading(true);
     setError(null);
     try {
-      const data = await fetchBenchmarkPrices(10);
-      if (data.sp500.length === 0 && data.msciWorld.length === 0) {
-        setError('Failed to fetch benchmark data. Check your CORS proxy in Settings.');
-      } else {
-        setBenchmarks(data);
-      }
+      await refreshBenchmarks();
     } catch (e) {
       setError('Failed to fetch benchmark data.');
       console.error(e);
     }
-    setLoading(false);
   };
-
-  useEffect(() => {
-    if (!benchmarks && !loading) {
-      loadBenchmarks();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const { chartData, performance } = useMemo(() => {
     if (!benchmarks) {

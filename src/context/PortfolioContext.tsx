@@ -18,8 +18,12 @@ import {
   loadExchangeRates,
   saveHistoricalPrices,
   loadHistoricalPrices,
+  saveBenchmarkPrices,
+  loadBenchmarkPrices,
+  isBenchmarkStale,
 } from '../utils/storage';
 import { fetchHistoricalPrices as fetchHistoricalPricesApi, isinToTicker } from '../utils/priceApi';
+import { fetchBenchmarkPrices, type BenchmarkPrices } from '../utils/benchmarks';
 
 interface PortfolioState {
   transactions: Transaction[];
@@ -29,6 +33,7 @@ interface PortfolioState {
   prices: Map<string, number>;
   exchangeRates: Map<string, number>;
   historicalPrices: Map<string, Array<{ date: string; price: number }>>;
+  benchmarkPrices: BenchmarkPrices | null;
   holdingMetadata: Map<string, HoldingMetadata>;
   isLoading: boolean;
   selectedTimeRange: TimeRange;
@@ -43,6 +48,7 @@ type PortfolioAction =
   | { type: 'UPDATE_PRICES'; payload: Map<string, number> }
   | { type: 'UPDATE_EXCHANGE_RATES'; payload: Map<string, number> }
   | { type: 'SET_HISTORICAL_PRICES'; payload: Map<string, Array<{ date: string; price: number }>> }
+  | { type: 'SET_BENCHMARK_PRICES'; payload: BenchmarkPrices | null }
   | { type: 'UPDATE_HOLDING_METADATA'; payload: HoldingMetadata }
   | { type: 'SET_HOLDING_METADATA'; payload: Map<string, HoldingMetadata> }
   | { type: 'SET_TIME_RANGE'; payload: TimeRange }
@@ -67,6 +73,7 @@ const initialState: PortfolioState = {
   prices: new Map(),
   exchangeRates: new Map(),
   historicalPrices: new Map(),
+  benchmarkPrices: null,
   holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: '3M',
@@ -136,6 +143,9 @@ function portfolioReducer(state: PortfolioState, action: PortfolioAction): Portf
       return recalculateState(newState);
     }
 
+    case 'SET_BENCHMARK_PRICES':
+      return { ...state, benchmarkPrices: action.payload };
+
     case 'SET_TIME_RANGE':
       return { ...state, selectedTimeRange: action.payload };
 
@@ -179,6 +189,8 @@ interface PortfolioContextValue extends PortfolioState {
   refreshData: () => void;
   fetchHistoricalData: (isins: string[]) => Promise<void>;
   historicalPricesLoading: boolean;
+  refreshBenchmarks: () => Promise<void>;
+  benchmarkPricesLoading: boolean;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
@@ -186,6 +198,7 @@ const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(portfolioReducer, initialState);
   const [historicalPricesLoading, setHistoricalPricesLoading] = useState(false);
+  const [benchmarkPricesLoading, setBenchmarkPricesLoading] = useState(false);
 
   // Load data from storage on mount
   useEffect(() => {
@@ -197,13 +210,46 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     const metadata = loadHoldingMetadata();
     const exchangeRates = loadExchangeRates();
     const historicalPrices = loadHistoricalPrices();
+    const cachedBenchmarks = loadBenchmarkPrices();
 
     dispatch({ type: 'UPDATE_EXCHANGE_RATES', payload: exchangeRates });
     dispatch({ type: 'SET_HISTORICAL_PRICES', payload: historicalPrices });
     dispatch({ type: 'UPDATE_PRICES', payload: prices });
     dispatch({ type: 'SET_HOLDING_METADATA', payload: metadata });
     dispatch({ type: 'SET_TRANSACTIONS', payload: transactions });
+
+    if (cachedBenchmarks) {
+      dispatch({
+        type: 'SET_BENCHMARK_PRICES',
+        payload: { sp500: cachedBenchmarks.sp500, msciWorld: cachedBenchmarks.msciWorld },
+      });
+    }
+
     dispatch({ type: 'SET_LOADING', payload: false });
+
+    // Refresh benchmarks if stale (or never loaded)
+    if (isBenchmarkStale(cachedBenchmarks)) {
+      loadFreshBenchmarks();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadFreshBenchmarks = useCallback(async () => {
+    setBenchmarkPricesLoading(true);
+    try {
+      const prices = await fetchBenchmarkPrices(10);
+      if (prices.sp500.length > 0 || prices.msciWorld.length > 0) {
+        dispatch({ type: 'SET_BENCHMARK_PRICES', payload: prices });
+        saveBenchmarkPrices({
+          sp500: prices.sp500,
+          msciWorld: prices.msciWorld,
+          fetchedAt: Date.now(),
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch benchmark prices:', e);
+    }
+    setBenchmarkPricesLoading(false);
   }, []);
 
   // Save transactions to storage when they change (snapshots are derived, no need to save)
@@ -302,6 +348,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     refreshData,
     fetchHistoricalData,
     historicalPricesLoading,
+    refreshBenchmarks: loadFreshBenchmarks,
+    benchmarkPricesLoading,
   };
 
   return (
