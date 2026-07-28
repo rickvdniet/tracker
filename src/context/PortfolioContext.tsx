@@ -77,7 +77,7 @@ const initialState: PortfolioState = {
   holdingMetadata: new Map(),
   isLoading: true,
   selectedTimeRange: '3M',
-  chartGranularity: 'monthly',
+  chartGranularity: 'weekly',
 };
 
 function recalculateState(state: PortfolioState): PortfolioState {
