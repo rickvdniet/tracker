@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import {
-  AreaChart,
+  ComposedChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
   ResponsiveContainer,
 } from 'recharts';
 import { format } from 'date-fns';
@@ -29,13 +31,6 @@ const timeRanges: { value: TimeRange; label: string }[] = [
   { value: 'ALL', label: 'All' },
 ];
 
-type ChartMode = 'value' | 'percent';
-
-const modeOptions: { value: ChartMode; label: string }[] = [
-  { value: 'value', label: '€' },
-  { value: 'percent', label: '%' },
-];
-
 interface ChartPoint {
   date: string;
   totalValue: number;
@@ -50,31 +45,33 @@ interface CustomTooltipProps {
   label?: string;
 }
 
-function CustomTooltip({ active, payload, label, granularity, mode }: CustomTooltipProps & { granularity?: ChartGranularity; mode: ChartMode }) {
+function CustomTooltip({ active, payload, label, granularity }: CustomTooltipProps & { granularity?: ChartGranularity }) {
   if (!active || !payload || payload.length === 0 || !label) return null;
   const data = payload[0].payload;
   const dateFormat = granularity === 'weekly' ? 'd MMM yyyy' : 'MMM yyyy';
 
   return (
-    <div className="bg-slate-700 border border-slate-600 rounded-lg p-3 shadow-lg">
+    <div className="bg-slate-700 border border-slate-600 rounded-lg p-3 shadow-lg min-w-[200px]">
       <p className="text-sm text-slate-400 mb-2">{format(new Date(label), dateFormat)}</p>
       <div className="space-y-1">
-        {mode === 'value' && (
-          <>
-            <div className="flex justify-between gap-4">
-              <span className="text-sm text-slate-300">Value:</span>
-              <span className="text-sm font-medium text-white">{formatCurrency(data.totalValue)}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-sm text-slate-300">Invested:</span>
-              <span className="text-sm text-slate-400">{formatCurrency(data.totalInvested)}</span>
-            </div>
-          </>
-        )}
+        <div className="flex justify-between gap-4">
+          <span className="text-sm text-emerald-400">Value:</span>
+          <span className="text-sm font-medium text-white">{formatCurrency(data.totalValue)}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-sm text-indigo-400">Invested:</span>
+          <span className="text-sm text-slate-300">{formatCurrency(data.totalInvested)}</span>
+        </div>
         <div className="flex justify-between gap-4">
           <span className="text-sm text-slate-300">P/L:</span>
           <span className={`text-sm font-medium ${data.totalProfitLoss >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {formatCurrency(data.totalProfitLoss)} ({formatPercent(data.profitLossPercent)})
+            {formatCurrency(data.totalProfitLoss)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4 pt-1 border-t border-slate-600">
+          <span className="text-sm text-amber-400">Return:</span>
+          <span className={`text-sm font-medium ${data.profitLossPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {formatPercent(data.profitLossPercent)}
           </span>
         </div>
       </div>
@@ -96,7 +93,6 @@ export function PortfolioChart() {
   } = usePortfolio();
 
   const [selectedIsin, setSelectedIsin] = useState<string>('portfolio');
-  const [chartMode, setChartMode] = useState<ChartMode>('value');
 
   const filteredSnapshots = filterSnapshotsByTimeRange(snapshots, selectedTimeRange);
 
@@ -171,24 +167,6 @@ export function PortfolioChart() {
             ))}
           </select>
         )}
-
-        {/* Mode toggle: € / % */}
-        <div className="flex gap-1 bg-slate-700/50 rounded-lg p-1">
-          {modeOptions.map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => setChartMode(value)}
-              title={value === 'value' ? 'Absolute EUR values' : 'Percentage return'}
-              className={`px-3 py-1.5 text-xs rounded-md transition-colors font-medium ${
-                chartMode === value
-                  ? 'bg-amber-500 text-white'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
 
         {/* Granularity toggle */}
         <div className="flex gap-1 bg-slate-700/50 rounded-lg p-1">
@@ -294,7 +272,7 @@ export function PortfolioChart() {
       ) : (
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
@@ -303,10 +281,6 @@ export function PortfolioChart() {
                 <linearGradient id="investedGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="percentGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
@@ -318,70 +292,78 @@ export function PortfolioChart() {
                 tickLine={false}
                 axisLine={false}
               />
+              {/* Left axis: EUR */}
               <YAxis
-                tickFormatter={(value) => chartMode === 'value' ? `€${(value / 1000).toFixed(0)}k` : `${value.toFixed(0)}%`}
+                yAxisId="euro"
+                orientation="left"
+                tickFormatter={(value) => `€${(value / 1000).toFixed(0)}k`}
                 stroke="#6b7280"
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
                 width={60}
               />
-              <Tooltip content={<CustomTooltip granularity={chartGranularity} mode={chartMode} />} />
-
-              {chartMode === 'value' ? (
-                <>
-                  <Area
-                    type="monotone"
-                    dataKey="totalInvested"
-                    stroke="#6366f1"
-                    strokeWidth={2}
-                    fill="url(#investedGradient)"
-                    name="Invested"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="totalValue"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    fill="url(#valueGradient)"
-                    name="Value"
-                  />
-                </>
-              ) : (
-                <Area
-                  type="monotone"
-                  dataKey="profitLossPercent"
-                  stroke="#f59e0b"
-                  strokeWidth={2}
-                  fill="url(#percentGradient)"
-                  name="Return %"
-                />
-              )}
-            </AreaChart>
+              {/* Right axis: % */}
+              <YAxis
+                yAxisId="percent"
+                orientation="right"
+                tickFormatter={(value) => `${value.toFixed(0)}%`}
+                stroke="#f59e0b"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+                width={45}
+              />
+              <Tooltip content={<CustomTooltip granularity={chartGranularity} />} />
+              {/* 0% reference line on the % axis */}
+              <ReferenceLine yAxisId="percent" y={0} stroke="#f59e0b" strokeDasharray="3 3" strokeOpacity={0.4} />
+              <Area
+                yAxisId="euro"
+                type="monotone"
+                dataKey="totalInvested"
+                stroke="#6366f1"
+                strokeWidth={2}
+                fill="url(#investedGradient)"
+                name="Invested"
+              />
+              <Area
+                yAxisId="euro"
+                type="monotone"
+                dataKey="totalValue"
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="url(#valueGradient)"
+                name="Value"
+              />
+              <Line
+                yAxisId="percent"
+                type="monotone"
+                dataKey="profitLossPercent"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={false}
+                name="Return %"
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      <div className="flex justify-center gap-6 mt-4">
-        {chartMode === 'value' ? (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-emerald-500" />
-              <span className="text-sm text-slate-400">
-                {selectedIsin === 'portfolio' ? 'Portfolio Value' : 'Current Value'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-indigo-500" />
-              <span className="text-sm text-slate-400">Amount Invested</span>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-amber-500" />
-            <span className="text-sm text-slate-400">Return % (P/L relative to invested)</span>
-          </div>
-        )}
+      <div className="flex flex-wrap justify-center gap-6 mt-4">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-emerald-500" />
+          <span className="text-sm text-slate-400">
+            {selectedIsin === 'portfolio' ? 'Portfolio Value' : 'Current Value'} <span className="text-slate-500">(€, left)</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-indigo-500" />
+          <span className="text-sm text-slate-400">Invested <span className="text-slate-500">(€, left)</span></span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-amber-500" />
+          <span className="text-sm text-slate-400">Return % <span className="text-slate-500">(right)</span></span>
+        </div>
       </div>
     </div>
   );
