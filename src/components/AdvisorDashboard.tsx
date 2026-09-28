@@ -9,15 +9,20 @@ import {
   Zap,
   Compass,
   HelpCircle,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { formatCurrency } from '../utils/calculations';
 import {
   analyzePortfolio,
+  monthName,
   SPECULATIVE_RULES,
   MONTHLY_BUDGET,
   CATEGORY_LABELS,
   type AllocationStatus,
+  type AdvisorAnalysis,
+  type MonthlyPlan,
 } from '../utils/advisor';
 
 function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
@@ -91,13 +96,158 @@ function AllocationBar({ alloc }: { alloc: AllocationStatus }) {
   );
 }
 
+const fmtPct = (v: number | null | undefined, digits = 1) =>
+  v === null || v === undefined ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`;
+
+function signalColor(v: number | null | undefined, goodWhenLow: boolean) {
+  if (v === null || v === undefined) return 'text-slate-500';
+  if (goodWhenLow) return v < 0 ? 'text-emerald-400' : 'text-slate-300';
+  return v >= 0 ? 'text-emerald-400' : 'text-red-400';
+}
+
+function PlanCard({ plan }: { plan: MonthlyPlan }) {
+  const blocked = plan.mode === 'blocked';
+  const dateLabel = plan.executionDate.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'long' });
+
+  return (
+    <div className={`rounded-xl border p-5 ${blocked ? 'bg-red-500/10 border-red-500/40' : 'bg-emerald-500/10 border-emerald-500/40'}`}>
+      <div className="flex items-start gap-4">
+        <div className={`p-3 rounded-lg shrink-0 ${blocked ? 'bg-red-500/20' : 'bg-emerald-500/20'}`}>
+          {blocked ? <Ban className="w-6 h-6 text-red-400" /> : plan.mode === 'dip-priority'
+            ? <Zap className="w-6 h-6 text-emerald-400" /> : <Target className="w-6 h-6 text-emerald-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
+            <h3 className="text-lg font-semibold text-white">{blocked ? 'Hold — no deploy' : 'Next month\'s plan'}</h3>
+            <span className="text-xs text-slate-400">Execute {dateLabel}, 15:45 · Limit orders @ Tradegate</span>
+          </div>
+          <p className="text-slate-300 text-sm">{plan.headline}</p>
+
+          {plan.orders.length > 0 && (
+            <div className={`mt-4 grid gap-3 ${plan.orders.length > 1 ? 'md:grid-cols-2' : ''}`}>
+              {plan.orders.map((o) => {
+                const cat = CATEGORY_LABELS[o.asset.category];
+                return (
+                  <div key={o.asset.key} className="bg-slate-900/60 border border-slate-700 rounded-lg p-4">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`text-xs px-2 py-0.5 rounded border text-white font-semibold shrink-0 ${cat.badgeClass}`}>
+                          {cat.icon} {cat.short}
+                        </span>
+                        <span className="text-sm font-medium text-white truncate">{o.asset.ticker}</span>
+                      </div>
+                      <span className="text-lg font-bold text-emerald-400 shrink-0">{formatCurrency(o.amountEur)}</span>
+                    </div>
+                    {o.shares !== null && o.limitPrice !== null ? (
+                      <p className="text-xs text-slate-400 mb-2">
+                        Buy <span className="text-white font-medium">{o.shares} shares</span> with a limit around{' '}
+                        <span className="text-white font-medium">{formatCurrency(o.limitPrice, o.currency)}</span>
+                        {' '}(≈ {formatCurrency(o.estCostEur ?? 0)}). Check the live quote before placing.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500 mb-2">No price available — fetch prices to calculate share count.</p>
+                    )}
+                    <ul className="space-y-1">
+                      {o.reasons.map((r) => (
+                        <li key={r} className="text-xs text-slate-300 flex gap-1.5">
+                          <span className="text-slate-600">•</span><span>{r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignalsTable({ analysis }: { analysis: AdvisorAnalysis }) {
+  return (
+    <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h3 className="text-lg font-semibold text-white mb-1">Market signals per bucket</h3>
+      <p className="text-xs text-slate-500 mb-4">
+        The allocation gap decides where money goes. These signals tilt the split by at most ±30%. Seasonality is based on ≤5 years of data and weighs least.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-500 border-b border-slate-700">
+              <th className="py-2 pr-4 font-medium">Bucket</th>
+              <th className="py-2 pr-4 font-medium text-right">30d</th>
+              <th className="py-2 pr-4 font-medium text-right">RSI (wk)</th>
+              <th className="py-2 pr-4 font-medium text-right">vs 52w high</th>
+              <th className="py-2 pr-4 font-medium text-right">vs 40w avg</th>
+              <th className="py-2 pr-4 font-medium text-right">Seasonality</th>
+              <th className="py-2 pr-4 font-medium text-right">Tilt</th>
+              <th className="py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {analysis.allocations.map((a) => {
+              const s = a.signals;
+              const ev = analysis.plan.evaluations.find((e) => e.asset === a.asset)!;
+              const order = analysis.plan.orders.find((o) => o.asset === a.asset);
+              return (
+                <tr key={a.asset.key} className="border-b border-slate-700/50 last:border-0">
+                  <td className="py-2 pr-4 text-white whitespace-nowrap">{CATEGORY_LABELS[a.asset.category].icon} {a.asset.ticker}</td>
+                  <td className={`py-2 pr-4 text-right ${signalColor(s?.return30d, false)}`}>{fmtPct(s?.return30d)}</td>
+                  <td className={`py-2 pr-4 text-right ${s?.rsi14w == null ? 'text-slate-500' : s.rsi14w < 40 ? 'text-emerald-400' : s.rsi14w > 65 ? 'text-amber-400' : 'text-slate-300'}`}>
+                    {s?.rsi14w == null ? '—' : s.rsi14w.toFixed(0)}
+                  </td>
+                  <td className={`py-2 pr-4 text-right ${signalColor(s?.drawdown52w, true)}`}>{fmtPct(s?.drawdown52w)}</td>
+                  <td className={`py-2 pr-4 text-right ${signalColor(s?.trendVs40w, false)}`}>{fmtPct(s?.trendVs40w)}</td>
+                  <td className="py-2 pr-4 text-right text-slate-300 whitespace-nowrap">
+                    {s?.seasonality
+                      ? <span title={`${s.seasonality.samples} years of data`}>{monthName(s.seasonality.month).slice(0, 3)} {fmtPct(s.seasonality.avgReturn)} <span className="text-slate-500">(n={s.seasonality.samples})</span></span>
+                      : '—'}
+                  </td>
+                  <td className={`py-2 pr-4 text-right ${ev.multiplier > 1.001 ? 'text-emerald-400' : ev.multiplier < 0.999 ? 'text-red-400' : 'text-slate-400'}`}>
+                    ×{ev.multiplier.toFixed(2)}
+                  </td>
+                  <td className="py-2 text-xs whitespace-nowrap">
+                    {order
+                      ? <span className="text-emerald-400 font-medium">Buy {formatCurrency(order.amountEur)}</span>
+                      : ev.blockedReason
+                        ? <span className="text-red-400" title={ev.blockedReason}>Blocked</span>
+                        : <span className="text-slate-500">Skip this month</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {analysis.plan.evaluations.some((e) => e.blockedReason) && (
+        <div className="mt-3 space-y-1">
+          {analysis.plan.evaluations.filter((e) => e.blockedReason).map((e) => (
+            <p key={e.asset.key} className="text-xs text-red-400">{e.asset.ticker}: {e.blockedReason}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdvisorDashboard() {
-  const { holdings, historicalPrices, holdingMetadata } = usePortfolio();
+  const {
+    holdings,
+    historicalPrices,
+    holdingMetadata,
+    exchangeRates,
+    fetchHistoricalData,
+    historicalPricesLoading,
+  } = usePortfolio();
 
   const analysis = useMemo(
-    () => analyzePortfolio(holdings, historicalPrices, holdingMetadata),
-    [holdings, historicalPrices, holdingMetadata]
+    () => analyzePortfolio(holdings, historicalPrices, holdingMetadata, exchangeRates),
+    [holdings, historicalPrices, holdingMetadata, exchangeRates]
   );
+
+  const bucketIsins = analysis.allocations.flatMap((a) => a.holdings.map((h) => h.isin));
 
   if (holdings.length === 0) {
     return (
@@ -156,51 +306,27 @@ export function AdvisorDashboard() {
         </div>
       )}
 
-      {/* Primary Recommendation */}
-      <div className={`rounded-xl border p-5 ${
-        analysis.recommendation.blocked
-          ? 'bg-red-500/10 border-red-500/40'
-          : 'bg-emerald-500/10 border-emerald-500/40'
-      }`}>
-        <div className="flex items-start gap-4">
-          <div className={`p-3 rounded-lg ${
-            analysis.recommendation.blocked ? 'bg-red-500/20' : 'bg-emerald-500/20'
-          }`}>
-            {analysis.recommendation.blocked ? (
-              <Ban className="w-6 h-6 text-red-400" />
-            ) : (
-              <Target className="w-6 h-6 text-emerald-400" />
-            )}
+      {/* Market data status */}
+      {analysis.plan.dataWarnings.length > 0 && (
+        <div className="rounded-xl border border-slate-600 bg-slate-800 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-slate-300">
+            <p className="text-sm font-semibold text-white mb-1">Market signals incomplete</p>
+            {analysis.plan.dataWarnings.map((w) => <p key={w}>{w}</p>)}
           </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="text-lg font-semibold text-white">
-                {analysis.recommendation.blocked ? 'HOLD — No Deploy' : 'Next Deploy'}
-              </h3>
-              {analysis.recommendation.asset && !analysis.recommendation.blocked && (
-                <span className="text-emerald-400 font-bold">
-                  → {analysis.recommendation.asset.ticker}
-                </span>
-              )}
-            </div>
-            <p className="text-slate-300 text-sm">{analysis.recommendation.reason}</p>
-            {!analysis.recommendation.blocked && analysis.recommendation.amount > 0 && (
-              <div className="mt-3 flex items-center gap-4 text-sm">
-                <div>
-                  <span className="text-slate-400">Amount:</span>
-                  <span className="text-white font-semibold ml-2">
-                    {formatCurrency(analysis.recommendation.amount)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Order type:</span>
-                  <span className="text-white font-semibold ml-2">Limit @ Tradegate</span>
-                </div>
-              </div>
-            )}
-          </div>
+          <button
+            onClick={() => fetchHistoricalData(bucketIsins)}
+            disabled={historicalPricesLoading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 text-white text-sm rounded-lg transition-colors shrink-0"
+          >
+            {historicalPricesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {historicalPricesLoading ? 'Loading…' : 'Load market data'}
+          </button>
         </div>
-      </div>
+      )}
+
+      <PlanCard plan={analysis.plan} />
+
+      <SignalsTable analysis={analysis} />
 
       {/* Iron Laws status */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
