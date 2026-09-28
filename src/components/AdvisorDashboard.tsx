@@ -145,7 +145,9 @@ function PlanCard({ plan }: { plan: MonthlyPlan }) {
                         {' '}(≈ {formatCurrency(o.estCostEur ?? 0)}). Check the live quote before placing.
                       </p>
                     ) : (
-                      <p className="text-xs text-slate-500 mb-2">No price available — fetch prices to calculate share count.</p>
+                      <p className="text-xs text-slate-500 mb-2">
+                        No quote for {o.asset.ticker} yet{o.asset.buyIsin ? ' (not held yet)' : ''} — check the live price in DeGiro and buy as many whole shares as {formatCurrency(o.amountEur)} allows.
+                      </p>
                     )}
                     <ul className="space-y-1">
                       {o.reasons.map((r) => (
