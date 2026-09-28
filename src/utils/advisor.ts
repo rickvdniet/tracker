@@ -10,6 +10,7 @@ export interface FrameworkAsset {
   name: string;
   ticker: string;
   defaultIsins: string[]; // used as fallback when user hasn't set frameworkCategory
+  buyIsin?: string;       // fund new money goes into when the bucket holds several; defaults to the largest holding
   category: FrameworkCategory;
   targetMin: number; // percent
   targetMax: number; // percent
@@ -19,13 +20,14 @@ export interface FrameworkAsset {
 export const FRAMEWORK: FrameworkAsset[] = [
   {
     key: 'core',
-    name: 'VWCE (Vanguard All-World)',
-    ticker: 'VWCE.DE',
-    defaultIsins: ['IE00BK5BQT80'],
+    name: 'VWCE / VGLA (Global Core)',
+    ticker: 'VGLA.DE',
+    defaultIsins: ['IE00BK5BQT80', 'IE000VAHT5T0'],
+    buyIsin: 'IE000VAHT5T0',
     category: 'core',
     targetMin: 55,
     targetMax: 60,
-    description: 'THE CORE: Global equity floor. Protection against regional implosions.',
+    description: 'THE CORE: Global equity floor. VWCE is held, new money goes to VGLA (0.07% TER, all-cap). Treated as one block.',
   },
   {
     key: 'turbo',
@@ -371,19 +373,33 @@ function toOrder(
   reasons: string[],
   exchangeRates: Map<string, number>
 ): PlanOrder {
-  const s = alloc.signals;
-  const currency = s?.currency ?? 'EUR';
-  if (!s || s.lastPrice <= 0) {
+  // Price the fund that is actually bought. If the bucket names a buy fund that isn't
+  // held yet, we have no quote for it, so the share count is left open.
+  const buyIsin = alloc.asset.buyIsin;
+  const buyHolding = buyIsin ? alloc.holdings.find((h) => h.isin === buyIsin) : undefined;
+  let lastPrice = 0;
+  let currency = 'EUR';
+  if (buyIsin) {
+    if (buyHolding && buyHolding.currentPrice > 0) {
+      lastPrice = buyHolding.currentPrice;
+      currency = getPriceCurrency(buyHolding.isin) ?? buyHolding.currency;
+    }
+  } else if (alloc.signals) {
+    lastPrice = alloc.signals.lastPrice;
+    currency = alloc.signals.currency;
+  }
+
+  if (lastPrice <= 0) {
     return { asset: alloc.asset, amountEur, shares: null, limitPrice: null, currency, estCostEur: null, score, reasons };
   }
   const rate = currency === 'EUR' ? 1 : (exchangeRates.get(currency) ?? 1);
-  const priceEur = s.lastPrice * rate;
+  const priceEur = lastPrice * rate;
   const shares = Math.floor(amountEur / priceEur);
   return {
     asset: alloc.asset,
     amountEur,
     shares,
-    limitPrice: s.lastPrice,
+    limitPrice: lastPrice,
     currency,
     estCostEur: shares * priceEur,
     score,
@@ -601,7 +617,7 @@ export const CATEGORY_LABELS: Record<FrameworkCategory, {
   icon: string;
   badgeClass: string;
 }> = {
-  core:        { label: 'Core (VWCE)',          short: 'CORE',        icon: '🛡️',  badgeClass: 'bg-emerald-500/20 border-emerald-500' },
+  core:        { label: 'Core (VWCE / VGLA)',       short: 'CORE',        icon: '🛡️',  badgeClass: 'bg-emerald-500/20 border-emerald-500' },
   turbo:       { label: 'Turbo (Nasdaq)',       short: 'TURBO',       icon: '⚡',   badgeClass: 'bg-orange-500/20 border-orange-500' },
   frontier:    { label: 'Frontier (Small Cap)', short: 'FRONTIER',    icon: '🔭',  badgeClass: 'bg-purple-500/20 border-purple-500' },
   proxy:       { label: 'Proxy (Investor AB)',  short: 'PROXY',       icon: '📊',  badgeClass: 'bg-blue-500/20 border-blue-500' },

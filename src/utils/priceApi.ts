@@ -58,6 +58,7 @@ const ISIN_TO_TICKER: Record<string, string> = {
   'IE00B5BMR087': 'CSPX.AS',  // iShares Core S&P 500
   'IE00B3RBWM25': 'VWRL.AS',  // Vanguard FTSE All-World
   'IE00BK5BQT80': 'VWCE.DE',  // Vanguard FTSE All-World Acc
+  'IE000VAHT5T0': 'VGLA.DE',  // Vanguard FTSE Global All-Cap Acc
   'LU0392494562': 'DBXD.DE',  // Xtrackers MSCI World
   'IE00BKM4GZ66': 'EMIM.AS',  // iShares Core EM IMI
   'IE00B4L5YC18': 'IEMA.AS',  // iShares MSCI EM
